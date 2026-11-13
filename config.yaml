@@ -26,7 +26,8 @@ calling:
 campuses:
   ecr:
     label: "ECR"
-    caller_id: "+910000000001"             # CONFIRM: campus number shown to parent
+    caller_id: "${DEMO_NUMBER}"            # Vobiz number for now (env var, e.g. +91...); swap per campus later
+    alert_emails: ["admissions.ecr@akshararbol.edu.in"]   # CONFIRM spelling: school typed "alshararbol"
     counselors:
       - name: "Vidya"                        # CONFIRM name of the ECR counselor (school gave only the number)
         numbers: ["+917550033275"]
@@ -34,7 +35,8 @@ campuses:
     counselor_ring_seconds: 25
   t_nagar:
     label: "T Nagar"
-    caller_id: "+910000000002"
+    caller_id: "${DEMO_NUMBER}"
+    alert_emails: ["admissions.tng@akshararbol.edu.in"]
     counselors:
       - name: "Viji"
         numbers: ["+917305972752"]
@@ -50,20 +52,20 @@ messages:
   fallback: "Thank you for staying on the call. Our admissions counselor will call you back shortly. We look forward to speaking with you soon."   # CONFIRM final wording with the school
 
 notifications:
-  admin_emails: ["admissions.tng@akshararbol.edu.in", "admissions.ecr@akshararbol.edu.in"]   # CONFIRM ECR spelling: school typed "alshararbol"
+  admin_emails: ["admissions.tng@akshararbol.edu.in", "admissions.ecr@akshararbol.edu.in", "bragadeeshsundararajan@gmail.com"]   # fallback + copies; each campus also has its own alert_emails
   smtp:                                    # leave host empty to log instead of sending
-    host: ""
+    host: ${SMTP_HOST}                     # e.g. smtp.gmail.com
     port: 587
-    user: ""
+    user: ${SMTP_USER}
     password: ${SMTP_PASSWORD}
-    sender: "alerts@example.com"
+    sender: ${SMTP_SENDER}                 # usually the same as SMTP_USER
 
 security:
   webhook_secret: ${WEBHOOK_SECRET}        # sent as header X-Webhook-Secret
   allowed_origins: []                      # leave empty: the Vercel app calls us from its server
 
 dialer:
-  type: mock                               # mock | vapi | http
+  type: vapi                               # mock | vapi | http  (mock = no real calls)
   backup: ""                               # optional second provider (type name), used only on error
   vapi:                                    # same engine Volant AI uses underneath
     api_key: ${VAPI_API_KEY}

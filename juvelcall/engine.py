@@ -206,6 +206,10 @@ class Engine:
 
     def _alert(self, now, kind, lead_id, subject, body, to=None):
         aid = self.store.add_alert(now, kind, lead_id, subject, body)
+        if not to and lead_id:
+            row = self.store.one("SELECT campus FROM leads WHERE id=?", (lead_id,))
+            camp = self.cfg.campuses.get(row["campus"]) if row and row["campus"] else None
+            to = (camp or {}).get("alert_emails") or None     # that campus's own admissions inbox
         ok = self.notifier.send(to or self.cfg.notifications.get("admin_emails", []), subject, body)
         if ok:
             self.store.x("UPDATE alerts SET sent=1 WHERE id=?", (aid,))

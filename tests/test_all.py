@@ -310,3 +310,12 @@ def test_per_day_hours():
     assert in_hours(datetime(2026, 11, 14, 13, 59, tzinfo=tz), c, tz)
     assert not in_hours(datetime(2026, 11, 17, 10, 0, tzinfo=tz), c, tz)      # Tue not listed
     assert next_open(datetime(2026, 11, 14, 15, 0, tzinfo=tz), c, tz) == datetime(2026, 11, 16, 8, 30, tzinfo=tz)
+
+
+def test_alert_goes_to_campus_inbox():
+    e, s, d, n = mk()
+    e.cfg.campuses["ecr"]["alert_emails"] = ["ecr-inbox@example.com"]
+    e.ingest([lead()], MON_10AM)
+    row = s.one("SELECT id FROM leads ORDER BY id DESC LIMIT 1")
+    e._alert(MON_10AM, "test", row["id"], "subj", "body")
+    assert n.sent[-1][0] == ["ecr-inbox@example.com"]
