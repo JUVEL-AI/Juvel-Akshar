@@ -45,7 +45,7 @@ def build(engine, now: datetime, day: str | None = None) -> dict:
     attention = [l for l in leads if l["status"] in
                  ("ANSWERED_NOT_TRANSFERRED", "NEEDS_REVIEW", "NO_RESPONSE", "INVALID_PHONE", "STALE")]
     return {
-        "generated_at": now.isoformat(), "day": day_start.date().isoformat(),
+        "generated_at": now.isoformat(), "day": day_start.date().isoformat(), "control": engine.control_info(),
         "campuses": {k: v["label"] for k, v in cfg.campuses.items()},
         "kpis": {"enquiries": len(leads), "called": len(called),
                  "called_within_5_min_pct": round(fast * 100 / len(called)) if called else 0,

@@ -335,3 +335,54 @@ def test_webhook_notifier_posts_and_falls_back(monkeypatch):
     fb = MemoryNotifier()
     assert WebhookNotifier("https://hook.example/x", fallback=fb).send(["a@x.com"], "S", "B")
     assert fb.sent
+
+
+# ---- start / pause / stop
+def test_pause_blocks_calls_and_resume_places_them():
+    e, s, d, n = mk()
+    e.set_control("pause", MON_10AM)
+    e.ingest([lead()], MON_10AM)
+    assert e.tick(MON_10AM) == [] and not d.calls                 # nothing dialed while paused
+    assert s.one("SELECT status FROM leads")["status"] == "QUEUED"  # enquiry is kept
+    e.set_control("start", MON_10AM + timedelta(minutes=30))
+    assert len(e.tick(MON_10AM + timedelta(minutes=30))) == 1     # called after resume
+
+
+def test_no_not_called_alert_while_paused():
+    e, s, d, n = mk()
+    e.set_control("pause", MON_10AM)
+    n.sent.clear()
+    e.ingest([lead()], MON_10AM)
+    e.tick(MON_10AM + timedelta(minutes=30))
+    assert not any("no call was placed" in x[1] for x in n.sent)
+
+
+def test_stop_parks_waiting_leads_and_new_ones():
+    e, s, d, n = mk()
+    e.ingest([lead("1")], MON_10AM)
+    res = e.set_control("stop", MON_10AM)
+    assert res["parked"] == 1 and res["state"] == "stopped"
+    e.ingest([lead("2", phone="9123456780")], MON_10AM)
+    assert {r["status"] for r in s.q("SELECT status FROM leads")} == {"NEEDS_REVIEW"}
+    e.set_control("start", MON_10AM + timedelta(minutes=5))
+    assert e.tick(MON_10AM + timedelta(minutes=5)) == [] and not d.calls   # parked leads are NOT auto-called
+
+
+def test_control_change_emails_admins_and_old_waiting_leads_go_stale():
+    e, s, d, n = mk()
+    e.set_control("pause", MON_10AM)
+    assert any("paused" in x[1].lower() for x in n.sent)
+    e.ingest([lead()], MON_10AM)
+    e.set_control("start", MON_10AM + timedelta(days=3))
+    e.tick(MON_10AM + timedelta(days=3))
+    assert s.one("SELECT status FROM leads")["status"] == "STALE" and not d.calls
+
+
+def test_control_api_needs_secret_and_validates():
+    e, s, d, n = mk()
+    c = TestClient(create_app(e, clock=lambda: MON_10AM))
+    h = {"X-Webhook-Secret": cfg.security["webhook_secret"]}
+    assert c.post("/api/control", json={"action": "pause"}).status_code == 401
+    assert c.post("/api/control", json={"action": "explode"}, headers=h).status_code == 422
+    assert c.post("/api/control", json={"action": "pause"}, headers=h).json()["state"] == "paused"
+    assert c.get("/api/console", headers=h).json()["control"]["state"] == "paused"

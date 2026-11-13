@@ -157,6 +157,20 @@ def create_app(engine: Engine, clock=now_utc, run_loop: bool = False, loop_secon
         auth(x_webhook_secret)
         return console.build(engine, clock(), day)
 
+    @app.get("/api/control")
+    def api_control_get(x_webhook_secret: str | None = Header(default=None)):
+        auth(x_webhook_secret)
+        return engine.control_info()
+
+    @app.post("/api/control")
+    def api_control_set(payload: dict, x_webhook_secret: str | None = Header(default=None)):
+        auth(x_webhook_secret)
+        try:
+            return engine.set_control(str(payload.get("action", "")).lower(), clock(),
+                                      str(payload.get("by") or "dashboard")[:40])
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+
     @app.get("/api/lead/{lead_id}")
     def api_lead(lead_id: int, x_webhook_secret: str | None = Header(default=None)):
         auth(x_webhook_secret)

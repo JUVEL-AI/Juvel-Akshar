@@ -4,5 +4,5 @@ export type Lead = {
 };
 export type ConsoleData = {
   generated_at: string; day: string; campuses: Record<string, string>;
-  leads: Lead[]; kpis?: Record<string, number>; outcomes?: Record<string, number>; by_hour?: Record<string, number>;
+  leads: Lead[]; control?: { state: "running" | "paused" | "stopped"; changed_at: string; by: string }; kpis?: Record<string, number>; outcomes?: Record<string, number>; by_hour?: Record<string, number>;
 };

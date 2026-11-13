@@ -48,12 +48,17 @@ function timeline(l: Lead, campusLabel: string) {
   return t;
 }
 
-export default function Console({ data, demo, error }: { data: ConsoleData; demo: boolean; error?: string }) {
+export default function Console({ data, demo, error, pinRequired = false }: { data: ConsoleData; demo: boolean; error?: string; pinRequired?: boolean }) {
   const router = useRouter();
   const [campus, setCampus] = useState("all");
   const [filter, setFilter] = useState("all");
   const [picked, setPicked] = useState<number | null>(null);
   const [stage, setStage] = useState(0);
+  const [ask, setAsk] = useState<"start" | "pause" | "stop" | null>(null);
+  const [pin, setPin] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [ctlErr, setCtlErr] = useState("");
+  const ctl = data.control?.state ?? "running";
 
   useEffect(() => { const t = setInterval(() => setStage((s) => (s + 1) % 4), 2600); return () => clearInterval(t); }, []);
   useEffect(() => { if (demo) return; const t = setInterval(() => router.refresh(), 15000); return () => clearInterval(t); }, [demo, router]);
@@ -89,6 +94,18 @@ export default function Console({ data, demo, error }: { data: ConsoleData; demo
     await fetch(`/api/resolve/${id}`, { method: "POST" });
     router.refresh();
   };
+  const sendControl = async () => {
+    if (!ask) return;
+    if (demo) { setAsk(null); return; }
+    setBusy(true); setCtlErr("");
+    try {
+      const r = await fetch("/api/control", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: ask, pin }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) { setCtlErr(j.error || "Could not change the setting. Try again."); setBusy(false); return; }
+      setAsk(null); setPin(""); router.refresh();
+    } catch { setCtlErr("Could not reach the server."); }
+    setBusy(false);
+  };
   const live = data.leads.find((l) => l.status === "CALLING");
   const st = STAGES[stage];
 
@@ -105,6 +122,47 @@ export default function Console({ data, demo, error }: { data: ConsoleData; demo
           <span className="chip"><span className="dot" />Mon–Fri 8:30–2:30 · Sat 9:00–2:00</span>
         </div>
       </header>
+
+      <section className={`ctl ${ctl}`} aria-label="Calling control">
+        <div className="ctl-state">
+          <span className="ctl-dot" />
+          <div>
+            <b>{ctl === "running" ? "Calling is ON" : ctl === "paused" ? "Calling is PAUSED" : "Calling is STOPPED"}</b>
+            <div className="sub">
+              {ctl === "running" && "New enquiries are called within minutes, inside calling hours."}
+              {ctl === "paused" && "No calls are going out. Enquiries are still saved and will be called when you press Start."}
+              {ctl === "stopped" && "No calls are going out. Waiting enquiries were moved to Needs review for your team to call by hand."}
+            </div>
+          </div>
+        </div>
+        <div className="ctl-btns">
+          <button type="button" className="cbtn go" disabled={ctl === "running"} onClick={() => { setCtlErr(""); setAsk("start"); }}>▶ Start</button>
+          <button type="button" className="cbtn pause" disabled={ctl !== "running"} onClick={() => { setCtlErr(""); setAsk("pause"); }}>⏸ Pause</button>
+          <button type="button" className="cbtn stop" disabled={ctl === "stopped"} onClick={() => { setCtlErr(""); setAsk("stop"); }}>⏹ Stop</button>
+        </div>
+      </section>
+
+      {ask && (
+        <div className="modal-bg" role="dialog" aria-modal="true" aria-label="Confirm" onClick={() => !busy && setAsk(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>{ask === "start" ? "Start calling?" : ask === "pause" ? "Pause calling?" : "Stop calling?"}</h2>
+            <p>
+              {ask === "start" && "Calls go out again. Enquiries that arrived while paused are called now (anything older than 48 hours is skipped)."}
+              {ask === "pause" && "No new calls will start. Calls already ringing finish normally. Enquiries are still saved and called when you press Start."}
+              {ask === "stop" && "No new calls will start, and every enquiry waiting to be called is moved to Needs review for your team to call by hand. Calls already ringing finish normally. New enquiries are also parked until you press Start."}
+            </p>
+            {pinRequired && <label className="pin">PIN<input type="password" inputMode="numeric" autoComplete="off" value={pin} onChange={(e) => setPin(e.target.value)} /></label>}
+            {ctlErr && <div className="err">{ctlErr}</div>}
+            {demo && <div className="sub">Preview mode: nothing will change.</div>}
+            <div className="modal-btns">
+              <button type="button" className="cbtn" disabled={busy} onClick={() => setAsk(null)}>Cancel</button>
+              <button type="button" className={`cbtn ${ask === "start" ? "go" : ask === "pause" ? "pause" : "stop"}`} disabled={busy || (pinRequired && !pin)} onClick={sendControl}>
+                {busy ? "Please wait…" : ask === "start" ? "Yes, start" : ask === "pause" ? "Yes, pause" : "Yes, stop"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <nav className="tabs" aria-label="Campus">
         {[["all", "All campuses"], ...Object.entries(data.campuses)].map(([k, name]) => (

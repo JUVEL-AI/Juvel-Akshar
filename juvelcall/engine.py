@@ -21,6 +21,45 @@ class Engine:
         self.webhook_url = webhook_url
         self.c = cfg.calling
 
+    # ---------- start / pause / stop ----------
+    CONTROL_LABEL = {"running": "Running", "paused": "Paused", "stopped": "Stopped"}
+
+    def control_state(self) -> str:
+        v = self.store.kv_get("control")
+        return v if v in self.CONTROL_LABEL else "running"
+
+    def control_info(self) -> dict:
+        return {"state": self.control_state(), "changed_at": self.store.kv_get("control_changed_at") or "",
+                "by": self.store.kv_get("control_by") or ""}
+
+    def set_control(self, action: str, now: datetime, who: str = "dashboard") -> dict:
+        """start = calls go out.  pause = no new calls; enquiries still saved and queued, called on start.
+        stop = no calls; everything waiting is parked for a person (Needs review); new enquiries are parked too.
+        Calls already ringing are not cut off."""
+        new = {"start": "running", "pause": "paused", "stop": "stopped"}.get(action)
+        if new is None:
+            raise ValueError("action must be start, pause or stop")
+        old = self.control_state()
+        parked = 0
+        if new == "stopped":
+            for r in self.store.q("SELECT id FROM leads WHERE status IN (?,?)", (Status.QUEUED.value, Status.RETRY.value)):
+                self.store.update_lead(r["id"], now, status=Status.NEEDS_REVIEW.value, next_attempt_at=None,
+                                       note="calling was stopped by an admin; please follow up by hand")
+                parked += 1
+        if new == "running" and old != "running":
+            # leads that waited while paused are called now (the 48 h stale rule still applies in tick)
+            self.store.x("UPDATE leads SET next_attempt_at=? WHERE status IN (?,?) AND next_attempt_at>?",
+                         (iso(now), Status.QUEUED.value, Status.RETRY.value, iso(now)))
+        self.store.kv_set("control", new)
+        self.store.kv_set("control_changed_at", iso(now))
+        self.store.kv_set("control_by", who)
+        if new != old:
+            extra = f" {parked} waiting enquiries were moved to Needs review." if parked else ""
+            self._alert(now, f"control_{new}", None, f"Calling {self.CONTROL_LABEL[new].lower()} ({who})",
+                        f"Automatic calling is now {self.CONTROL_LABEL[new].upper()}, set from the {who} at "
+                        f"{now.astimezone(self.cfg.tz):%d %b %H:%M}.{extra}")
+        return self.control_info() | {"parked": parked}
+
     # ---------- intake ----------
     def ingest(self, leads: list[RawLead], now: datetime) -> dict:
         out = {"new": 0, "skipped_existing": 0}
@@ -48,6 +87,8 @@ class Engine:
             status, note = Status.NEEDS_REVIEW, f"unknown campus '{lead.campus}'"
         elif now - lead.created_at > timedelta(hours=self.c["stale_after_hours"]):
             status, note = Status.STALE, "lead too old for automatic call"
+        elif self.control_state() == "stopped":
+            status, note = Status.NEEDS_REVIEW, "arrived while calling was stopped; please follow up by hand"
         else:
             next_at = next_open(max(now, lead.created_at), self.c, self.cfg.tz)
 
@@ -59,7 +100,7 @@ class Engine:
              clean_name(lead.student_name), phone, lead.phone, campus, lead.campus, grade, lead.grade_text,
              lead.email, lead.city, status.value, iso(next_at) if next_at else None, note,
              self.store.dump_raw(lead.raw), iso(now)))
-        if status in (Status.INVALID_PHONE, Status.NEEDS_REVIEW):   # old leads (e.g. first sheet import) stay silent
+        if status in (Status.INVALID_PHONE, Status.NEEDS_REVIEW) and "while calling was stopped" not in note:   # old leads (e.g. first sheet import) stay silent
             self._alert(now, "lead_needs_attention", lead_id,
                         f"Admissions lead needs attention ({status.value})",
                         f"Lead #{lead_id}: {clean_name(lead.name)} / {lead.phone} / {lead.campus}\n{note}\n"
@@ -76,10 +117,18 @@ class Engine:
     def tick(self, now: datetime, limit: int = 50) -> list[str]:
         """Place every call that is due. Returns call_refs placed."""
         placed = []
+        if self.control_state() != "running":
+            self.watchdog(now)               # only closes stuck calls while paused/stopped
+            return placed
         rows = self.store.q(
             "SELECT * FROM leads WHERE status IN (?,?) AND next_attempt_at<=? ORDER BY next_attempt_at LIMIT ?",
             (Status.QUEUED.value, Status.RETRY.value, iso(now), limit))
         for r in rows:
+            made = parse(r["created_at"])
+            if made and now - made > timedelta(hours=self.c["stale_after_hours"]):
+                self.store.update_lead(r["id"], now, status=Status.STALE.value, next_attempt_at=None,
+                                       note="waited too long (calling was paused or the system was down)")
+                continue
             if not in_hours(now, self.c, self.cfg.tz):
                 self.store.update_lead(r["id"], now, next_attempt_at=iso(next_open(now, self.c, self.cfg.tz)))
                 continue
@@ -187,7 +236,9 @@ class Engine:
     def watchdog(self, now: datetime) -> None:
         """1) inquiry arrived, still not called -> alert once.  2) call stuck with no result -> fail it."""
         limit = timedelta(minutes=self.c["alert_if_not_called_after_minutes"])
-        for r in self.store.q("SELECT * FROM leads WHERE status=? AND alerted_not_called=0", (Status.QUEUED.value,)):
+        running = self.control_state() == "running"
+        for r in (self.store.q("SELECT * FROM leads WHERE status=? AND alerted_not_called=0", (Status.QUEUED.value,))
+                  if running else []):
             due = parse(r["next_attempt_at"])
             if due and now - due > limit and in_hours(now, self.c, self.cfg.tz):
                 self.store.update_lead(r["id"], now, alerted_not_called=1)

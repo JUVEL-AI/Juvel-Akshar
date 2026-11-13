@@ -7,6 +7,7 @@ const L = (id: number, time: string, parent: string, student: string, cls: strin
 export const SAMPLE: ConsoleData = {
   generated_at: new Date().toISOString(), day: "sample",
   campuses: { ecr: "ECR", t_nagar: "T Nagar" },
+  control: { state: "running", changed_at: "", by: "" },
   leads: [
     L(12, "13:55", "Harini V", "Myra", "LKG", "ecr", "+91 99••• ••412", "RETRY", 2, 80),
     L(11, "13:22", "Nithya P", "Aadhi", "2nd grade", "t_nagar", "+91 97••• ••859", "TRANSFERRED", 1, 69),

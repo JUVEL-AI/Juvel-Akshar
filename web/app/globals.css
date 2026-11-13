@@ -81,3 +81,25 @@ h2{margin:0;font-size:16px;font-weight:800}
 .safe u{text-decoration:none;width:20px;height:20px;flex:none;border-radius:50%;background:rgba(61,220,151,.15);color:var(--green);display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;margin-top:1px}
 @media (max-width:640px){.shell{padding:20px 16px 48px}}
 @media (prefers-reduced-motion:reduce){.dot,.wave span{animation:none}}
+
+.ctl{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:14px;background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:14px 20px}
+.ctl.paused{border-color:rgba(255,181,71,.55);background:rgba(255,181,71,.08)}
+.ctl.stopped{border-color:rgba(255,107,107,.55);background:rgba(255,107,107,.08)}
+.ctl-state{display:flex;align-items:center;gap:14px;min-width:0;flex:1 1 320px}
+.ctl-state b{font-size:15px}
+.ctl-dot{width:12px;height:12px;border-radius:50%;flex:none;background:var(--green);animation:pulse 1.6s infinite}
+.ctl.paused .ctl-dot{background:var(--amber);animation:none}
+.ctl.stopped .ctl-dot{background:var(--red);animation:none}
+.ctl-btns{display:flex;flex-wrap:wrap;gap:8px}
+.cbtn{border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:12px;padding:10px 18px;font-size:14px;font-weight:800;min-height:44px}
+.cbtn:disabled{opacity:.4;cursor:not-allowed}
+.cbtn.go{background:var(--green);border-color:var(--green);color:#06231A}
+.cbtn.pause{background:var(--amber);border-color:var(--amber);color:#2B1A00}
+.cbtn.stop{background:var(--red);border-color:var(--red);color:#3A0A0A}
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.62);display:flex;align-items:center;justify-content:center;padding:16px;z-index:50}
+.modal{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:24px;max-width:460px;width:100%;display:flex;flex-direction:column;gap:14px}
+.modal p{margin:0;font-size:14px;line-height:1.55;color:var(--soft)}
+.modal-btns{display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap}
+.pin{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700;color:var(--soft)}
+.pin input{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;color:var(--text);font-size:16px}
+.err{color:var(--red);font-size:13px;font-weight:700}
