@@ -1,0 +1,93 @@
+# Juvel call automation - Akshar Arbol International School
+# Values marked CONFIRM are placeholders until the school / provider confirms them.
+timezone: Asia/Kolkata
+database: ${DATABASE_URL}            # Supabase Postgres URL; empty = local SQLite file juvelcall.db
+
+calling:
+  # School's answer (12 Nov): weekdays 08:30-14:30, Saturday 09:00-14:00, Sunday closed.
+  hours:
+    mon: ["08:30", "14:30"]
+    tue: ["08:30", "14:30"]
+    wed: ["08:30", "14:30"]
+    thu: ["08:30", "14:30"]
+    fri: ["08:30", "14:30"]
+    sat: ["09:00", "14:00"]
+  days: [mon, tue, wed, thu, fri, sat]     # fallback only, used if `hours` is removed
+  start: "08:30"
+  end: "14:30"
+  first_call_within_minutes: 5
+  retry_minutes: [15, 60, 240]             # delay before attempt 2, 3, 4
+  max_attempts: 4
+  stale_after_hours: 48                    # older leads are not auto-called
+  dedupe_window_hours: 72                  # same phone inside this window = duplicate
+  alert_if_not_called_after_minutes: 10    # inquiry arrived, no call placed
+  max_call_seconds: 300                    # school: no call beyond 5 minutes
+
+campuses:
+  ecr:
+    label: "ECR"
+    caller_id: "+910000000001"             # CONFIRM: campus number shown to parent
+    counselors:
+      - name: "Vidya"                        # CONFIRM name of the ECR counselor (school gave only the number)
+        numbers: ["+917550033275"]
+    backup_numbers: []                     # school: not required
+    counselor_ring_seconds: 25
+  t_nagar:
+    label: "T Nagar"
+    caller_id: "+910000000002"
+    counselors:
+      - name: "Viji"
+        numbers: ["+917305972752"]
+    backup_numbers: []                     # school: not required
+    counselor_ring_seconds: 25
+
+messages:
+  school_name: "Akshar Arbol International School"
+  greeting: "Hello, calling from {school_name} regarding your registration. {counselor_name} from the admissions team will speak with you now. Please stay on the line."
+  whisper_full: "Admissions inquiry. Parent {parent_name}, student {student_name}, class {grade}, {campus_label} campus. Connecting now."
+  whisper_no_class: "Admissions inquiry. Parent {parent_name}, student {student_name}, {campus_label} campus. Connecting now."
+  whisper_minimal: "Admissions inquiry. Parent {parent_name}, {campus_label} campus. Connecting now."
+  fallback: "Thank you for staying on the call. Our admissions counselor will call you back shortly. We look forward to speaking with you soon."   # CONFIRM final wording with the school
+
+notifications:
+  admin_emails: ["admissions.tng@akshararbol.edu.in", "admissions.ecr@akshararbol.edu.in"]   # CONFIRM ECR spelling: school typed "alshararbol"
+  smtp:                                    # leave host empty to log instead of sending
+    host: ""
+    port: 587
+    user: ""
+    password: ${SMTP_PASSWORD}
+    sender: "alerts@example.com"
+
+security:
+  webhook_secret: ${WEBHOOK_SECRET}        # sent as header X-Webhook-Secret
+  allowed_origins: []                      # leave empty: the Vercel app calls us from its server
+
+dialer:
+  type: mock                               # mock | vapi | http
+  backup: ""                               # optional second provider (type name), used only on error
+  vapi:                                    # same engine Volant AI uses underneath
+    api_key: ${VAPI_API_KEY}
+    phone_number_id: ${VAPI_PHONE_NUMBER_ID}   # Vapi's id for the number that dials out
+    server_secret: ${VAPI_SERVER_SECRET}     # must match the secret sent to /webhooks/vapi
+  http:
+    url: ""
+    auth_header: "Authorization"
+    auth_value: ""
+
+volant_sync:                               # push every finished call into Volant's dashboard
+  url: ${VOLANT_SYNC_URL}                  # Volant /webhooks/make?tenant_id=...  (CONFIRM)
+
+sources:
+  sheet:                                   # live Google Sheet the Meta leads land in (CONFIRM)
+    spreadsheet_id: ${SHEET_ID}
+    worksheet: "Sheet1"
+    poll_seconds: 60
+  csv_columns:                             # map your sheet's column titles (CONFIRM)
+    created_at: "created_time"
+    name: "full_name"
+    student_name: "student_name"
+    phone: "phone_number"
+    campus: "campus"
+    grade: "grade"
+    email: "email"
+    city: "city"

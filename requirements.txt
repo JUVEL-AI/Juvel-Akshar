@@ -1,0 +1,9 @@
+fastapi>=0.110
+uvicorn>=0.29
+pyyaml>=6.0
+requests>=2.31
+phonenumbers>=8.13
+# optional: Google Sheets source / sink
+gspread>=6.0
+# Supabase Postgres driver
+psycopg[binary]>=3.1

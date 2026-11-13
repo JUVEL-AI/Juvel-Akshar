@@ -1,0 +1,29 @@
+# Render Blueprint for the calling backend (always-on web service).
+# New > Blueprint > pick this repo. Fill the "sync: false" secrets in the dashboard.
+services:
+  - type: web
+    name: juvel-calling
+    runtime: docker
+    plan: starter          # do NOT use free: it sleeps and would miss leads
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL          # Supabase > Project Settings > Database > connection string (session pooler)
+        sync: false
+      - key: WEBHOOK_SECRET        # any long random string; also set in the Vercel app
+        generateValue: true
+      - key: PUBLIC_URL            # this service's own https URL, e.g. https://juvel-calling.onrender.com
+        sync: false
+      - key: VAPI_API_KEY
+        sync: false
+      - key: VAPI_PHONE_NUMBER_ID
+        sync: false
+      - key: VAPI_SERVER_SECRET
+        generateValue: true
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: VOLANT_SYNC_URL
+        sync: false
+      - key: GOOGLE_SERVICE_ACCOUNT_JSON
+        sync: false
+      - key: SHEET_ID
+        sync: false
