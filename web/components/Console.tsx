@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import type { ConsoleData, Lead } from "@/lib/types";
 
 const META: Record<string, { label: string; tone: string; bg: string; group: string }> = {
@@ -48,7 +49,8 @@ function timeline(l: Lead, campusLabel: string) {
   return t;
 }
 
-export default function Console({ data, demo, error, pinRequired = false }: { data: ConsoleData; demo: boolean; error?: string; pinRequired?: boolean }) {
+export default function Console({ data, demo, error, pinRequired = false, role = "admin", user = "", day }: { data: ConsoleData; demo: boolean; error?: string; pinRequired?: boolean; role?: "admin" | "staff"; user?: string; day?: string }) {
+  const admin = role === "admin";
   const router = useRouter();
   const [campus, setCampus] = useState("all");
   const [filter, setFilter] = useState("all");
@@ -59,6 +61,19 @@ export default function Console({ data, demo, error, pinRequired = false }: { da
   const [busy, setBusy] = useState(false);
   const [ctlErr, setCtlErr] = useState("");
   const ctl = data.control?.state ?? "running";
+  const [q, setQ] = useState("");
+  const [found, setFound] = useState<{ id: number; when: string; parent: string; student: string; class: string; campus: string; phone: string; status: string; attempts: number; note: string }[] | null>(null);
+  useEffect(() => {
+    if (q.trim().length < 3 || demo) { setFound(null); return; }
+    const t = setTimeout(async () => { const r = await fetch(`/api/search?q=${encodeURIComponent(q)}`); setFound(r.ok ? await r.json() : []); }, 350);
+    return () => clearTimeout(t);
+  }, [q, demo]);
+  const toggleDuty = async (k: string, idx: number) => {
+    const cs = data.campus_status?.[k]; if (!cs || demo) return;
+    const counselors = cs.counselors.map((c, i) => (i === idx ? { ...c, on_duty: !c.on_duty } : c));
+    await fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ campuses: { [k]: { counselors } } }) });
+    router.refresh();
+  };
 
   useEffect(() => { const t = setInterval(() => setStage((s) => (s + 1) % 4), 2600); return () => clearInterval(t); }, []);
   useEffect(() => { if (demo) return; const t = setInterval(() => router.refresh(), 15000); return () => clearInterval(t); }, [demo, router]);
@@ -119,7 +134,9 @@ export default function Console({ data, demo, error, pinRequired = false }: { da
         <div className="chips">
           {demo && <span className="chip warn">Sample data for preview</span>}
           {error && <span className="chip bad">Backend not reachable</span>}
-          <span className="chip"><span className="dot" />Mon–Fri 8:30–2:30 · Sat 9:00–2:00</span>
+          <span className="chip"><span className="dot" />{data.hours_label ?? "Mon–Fri 8:30–2:30 · Sat 9:00–2:00"}</span>
+          {admin && <Link href="/settings" className="chip" style={{ textDecoration: "none", color: "inherit" }}>⚙ Settings</Link>}
+          {user && <span className="chip" title="Signed in as">{user}{admin ? " · admin" : ""}</span>}
         </div>
       </header>
 
@@ -135,11 +152,11 @@ export default function Console({ data, demo, error, pinRequired = false }: { da
             </div>
           </div>
         </div>
-        <div className="ctl-btns">
+        {admin ? <div className="ctl-btns">
           <button type="button" className="cbtn go" disabled={ctl === "running"} onClick={() => { setCtlErr(""); setAsk("start"); }}>▶ Start</button>
           <button type="button" className="cbtn pause" disabled={ctl !== "running"} onClick={() => { setCtlErr(""); setAsk("pause"); }}>⏸ Pause</button>
           <button type="button" className="cbtn stop" disabled={ctl === "stopped"} onClick={() => { setCtlErr(""); setAsk("stop"); }}>⏹ Stop</button>
-        </div>
+        </div> : <span className="sub">Only an admin can start, pause or stop calling.</span>}
       </section>
 
       {ask && (
@@ -162,6 +179,32 @@ export default function Console({ data, demo, error, pinRequired = false }: { da
             </div>
           </div>
         </div>
+      )}
+
+      {data.campus_status && (
+        <div className="chips" aria-label="Counselors on duty">
+          {Object.entries(data.campus_status).map(([k, cs]) => cs.counselors.map((c, i) => (
+            <span key={k + i} className={`duty ${c.on_duty ? "" : "off"}`}>
+              {cs.label}: {c.name} {c.on_duty ? "on duty" : "OUT"}
+              {admin && !demo && <button type="button" onClick={() => toggleDuty(k, i)}>{c.on_duty ? "Mark out" : "Mark in"}</button>}
+            </span>)))}
+          {Object.values(data.campus_status).some((c) => !c.on_duty) && <span className="chip bad">A campus has nobody on duty. Its enquiries are waiting.</span>}
+        </div>
+      )}
+
+      <div className="toolbar">
+        <input type="date" aria-label="Day" value={day ?? data.day.slice(0, 10)} disabled={demo}
+          onChange={(e) => e.target.value && router.push(`/?day=${e.target.value}`)} />
+        <input type="search" aria-label="Search parent, student or phone" placeholder="Search parent, student or last digits of a phone…" value={q} onChange={(e) => setQ(e.target.value)} />
+        {admin && !demo && <a className="cbtn" style={{ textDecoration: "none" }} href={`/api/export${day ? `?day=${day}` : ""}`}>⬇ Download Excel (CSV)</a>}
+      </div>
+      {found && (
+        <section className="card srch" aria-label="Search results">
+          <h2>{found.length} match{found.length === 1 ? "" : "es"} for “{q}”</h2>
+          {found.map((f) => (
+            <div className="sr" key={f.id}><span className="mono">{f.when}</span><b>{f.parent || "Parent"}</b><span>{f.student}{f.class ? ` · ${f.class}` : ""}</span><span>{f.campus}</span><span className="mono">{f.phone}</span><span className="pill" style={{ color: meta(f.status).tone, background: meta(f.status).bg }}>{meta(f.status).label}</span></div>
+          ))}
+        </section>
       )}
 
       <nav className="tabs" aria-label="Campus">

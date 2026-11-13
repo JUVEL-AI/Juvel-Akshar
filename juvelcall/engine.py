@@ -6,6 +6,7 @@ from .config import Config
 from .dialers.base import Dialer, DialerError
 from .models import CallEvent, CallPlan, EventKind, RawLead, Status
 from .normalize import canonical_campus, clean_grade, clean_name, clean_phone
+from . import ops
 from .notify import Notifier
 from .rules import in_hours, next_open
 from .store import Store, iso, parse
@@ -20,6 +21,25 @@ class Engine:
         self.cfg, self.store, self.dialer, self.notifier = cfg, store, dialer, notifier
         self.webhook_url = webhook_url
         self.c = cfg.calling
+        ops.snapshot_base(self)
+
+    def _on_duty(self, campus_key: str):
+        """First counselor of the campus marked on duty (set from the dashboard Settings page), or None."""
+        for c in self.cfg.campuses[campus_key]["counselors"]:
+            if c.get("on_duty", True):
+                return c
+        return None
+
+    def _parent_followup(self, lead, kind: str, now) -> None:
+        """Optional message to the parent (e.g. WhatsApp sent by Make). Off unless notifications.parent_followup.enabled."""
+        pf = (self.cfg.notifications or {}).get("parent_followup") or {}
+        if not pf.get("enabled") or not lead["phone"]:
+            return
+        text = (pf.get("text_callback") if kind == "callback" else pf.get("text_no_response")) or ""
+        if text:
+            self.notifier.post_event("parent_message", {
+                "channel": pf.get("channel", "whatsapp"), "to": lead["phone"], "parent": lead["name"] or "",
+                "text": text.format(school_name=self.cfg.messages["school_name"], parent_name=lead["name"] or "Parent")})
 
     # ---------- start / pause / stop ----------
     CONTROL_LABEL = {"running": "Running", "paused": "Paused", "stopped": "Stopped"}
@@ -53,6 +73,7 @@ class Engine:
         self.store.kv_set("control", new)
         self.store.kv_set("control_changed_at", iso(now))
         self.store.kv_set("control_by", who)
+        self.store.add_audit(now, who, f"calling_{new}", f"{old} -> {new}" + (f", parked {parked}" if parked else ""))
         if new != old:
             extra = f" {parked} waiting enquiries were moved to Needs review." if parked else ""
             self._alert(now, f"control_{new}", None, f"Calling {self.CONTROL_LABEL[new].lower()} ({who})",
@@ -62,6 +83,7 @@ class Engine:
 
     # ---------- intake ----------
     def ingest(self, leads: list[RawLead], now: datetime) -> dict:
+        ops.apply_overrides(self)
         out = {"new": 0, "skipped_existing": 0}
         for lead in sorted(leads, key=lambda l: l.created_at):
             if self.store.one("SELECT 1 FROM leads WHERE source=? AND key=?", (lead.source, lead.key)):
@@ -117,6 +139,7 @@ class Engine:
     def tick(self, now: datetime, limit: int = 50) -> list[str]:
         """Place every call that is due. Returns call_refs placed."""
         placed = []
+        ops.apply_overrides(self)
         if self.control_state() != "running":
             self.watchdog(now)               # only closes stuck calls while paused/stopped
             return placed
@@ -132,6 +155,8 @@ class Engine:
             if not in_hours(now, self.c, self.cfg.tz):
                 self.store.update_lead(r["id"], now, next_attempt_at=iso(next_open(now, self.c, self.cfg.tz)))
                 continue
+            if not self._on_duty(r["campus"]):
+                continue                 # nobody on duty for this campus: lead waits, the watchdog emails after 10 min
             ref = self._place(r, now)
             if ref:
                 placed.append(ref)
@@ -140,7 +165,7 @@ class Engine:
 
     def build_plan(self, r) -> CallPlan:
         campus = self.cfg.campuses[r["campus"]]
-        counselor = campus["counselors"][0]
+        counselor = self._on_duty(r["campus"]) or campus["counselors"][0]
         m = self.cfg.messages
         ctx = dict(school_name=m["school_name"], counselor_name=counselor["name"],
                    campus_label=campus["label"], student_name=r["student_name"], grade=r["grade"],
@@ -206,6 +231,7 @@ class Engine:
                         self._lead_summary(lead) + "\nParent heard the fallback message and expects a call back. "
                         "Please call this parent as soon as possible.",
                         to=self.cfg.notifications.get("admin_emails", []))
+            self._parent_followup(lead, "callback", now)
         else:   # NO_ANSWER / BUSY / FAILED
             attempts = lead["attempts"]
             if attempts >= self.c["max_attempts"]:
@@ -214,6 +240,7 @@ class Engine:
                 self._alert(now, "no_response", lead["id"],
                             f"Parent not reachable after {attempts} attempts",
                             self._lead_summary(lead) + "\nAll automatic attempts used. Please try manually.")
+                self._parent_followup(lead, "no_response", now)
             else:
                 delays = self.c["retry_minutes"]
                 delay = delays[min(attempts - 1, len(delays) - 1)]
@@ -265,13 +292,14 @@ class Engine:
         if ok:
             self.store.x("UPDATE alerts SET sent=1 WHERE id=?", (aid,))
 
-    def resolve(self, lead_id: int, now: datetime, note: str = "") -> bool:
+    def resolve(self, lead_id: int, now: datetime, note: str = "", who: str = "") -> bool:
         """A person has dealt with this lead (called the parent back, etc.)."""
         r = self.store.one("SELECT status FROM leads WHERE id=?", (lead_id,))
         if not r:
             return False
         self.store.update_lead(lead_id, now, status=Status.RESOLVED.value, next_attempt_at=None,
                                note=(note or "resolved by a person")[:300])
+        self.store.add_audit(now, who, "mark_done", f"lead {lead_id}")
         return True
 
     def report(self) -> dict:

@@ -3,10 +3,10 @@ import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import console
+from . import console, ops
 
 from .config import Config
 from .dialers import dialer_from_config
@@ -150,6 +150,10 @@ def create_app(engine: Engine, clock=now_utc, run_loop: bool = False, loop_secon
                 except Exception as e:
                     out["sheet_error"] = str(e)[:200]
         out["placed"] = engine.tick(clock(), limit=10)
+        try:                                           # reports and reminders must never stop calls
+            out.update(ops.periodic(engine, clock()))
+        except Exception as e:
+            out["periodic_error"] = str(e)[:200]
         return out
 
     @app.get("/api/console")
@@ -171,6 +175,38 @@ def create_app(engine: Engine, clock=now_utc, run_loop: bool = False, loop_secon
         except ValueError as e:
             raise HTTPException(422, str(e))
 
+    @app.get("/api/settings")
+    def api_settings_get(x_webhook_secret: str | None = Header(default=None)):
+        auth(x_webhook_secret)
+        ops.apply_overrides(engine)
+        return ops.effective_settings(engine)
+
+    @app.put("/api/settings")
+    def api_settings_put(payload: dict, x_webhook_secret: str | None = Header(default=None)):
+        auth(x_webhook_secret)
+        who = str(payload.pop("by", "dashboard"))[:40]
+        try:
+            return ops.save_settings(engine, payload, clock(), who)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+
+    @app.get("/api/audit")
+    def api_audit(limit: int = 40, x_webhook_secret: str | None = Header(default=None)):
+        auth(x_webhook_secret)
+        rows = engine.store.q("SELECT created_at AS at,who,action,detail FROM audit ORDER BY id DESC LIMIT ?", (min(limit, 200),))
+        return [dict(r) for r in rows]
+
+    @app.get("/api/search")
+    def api_search(q: str = "", x_webhook_secret: str | None = Header(default=None)):
+        auth(x_webhook_secret)
+        return ops.search(engine, q)
+
+    @app.get("/api/export")
+    def api_export(day: str | None = None, by: str = "dashboard", x_webhook_secret: str | None = Header(default=None)):
+        auth(x_webhook_secret)
+        engine.store.add_audit(clock(), by[:40], "export", day or "today")
+        return Response(ops.export_csv(engine, day, clock()), media_type="text/csv; charset=utf-8")
+
     @app.get("/api/lead/{lead_id}")
     def api_lead(lead_id: int, x_webhook_secret: str | None = Header(default=None)):
         auth(x_webhook_secret)
@@ -182,7 +218,7 @@ def create_app(engine: Engine, clock=now_utc, run_loop: bool = False, loop_secon
     @app.post("/api/lead/{lead_id}/resolve")
     def api_resolve(lead_id: int, payload: dict | None = None, x_webhook_secret: str | None = Header(default=None)):
         auth(x_webhook_secret)
-        if not engine.resolve(lead_id, clock(), (payload or {}).get("note", "")):
+        if not engine.resolve(lead_id, clock(), (payload or {}).get("note", ""), str((payload or {}).get("by", ""))[:40]):
             raise HTTPException(404, "no such lead")
         return {"ok": True}
 

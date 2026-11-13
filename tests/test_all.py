@@ -19,8 +19,9 @@ MON_10AM = datetime(2026, 10, 19, 10, 0, tzinfo=IST)   # Monday
 
 
 def mk(now=MON_10AM, **kw):
+    import copy
     s, d, n = Store(), MockDialer(), MemoryNotifier()
-    return Engine(cfg, s, d, n), s, d, n
+    return Engine(Config(copy.deepcopy(cfg.data)), s, d, n), s, d, n   # own config copy: settings tests must not leak
 
 
 def lead(key="1", phone="9876543210", campus="ecr_campus", grade="LKG", student="Aarav", at=MON_10AM, **kw):
@@ -314,7 +315,7 @@ def test_per_day_hours():
 
 def test_alert_goes_to_campus_inbox():
     e, s, d, n = mk()
-    e.cfg.campuses["ecr"]["alert_emails"] = ["ecr-inbox@example.com"]
+    e._base["campuses"]["ecr"]["alert_emails"] = ["ecr-inbox@example.com"]
     e.ingest([lead()], MON_10AM)
     row = s.one("SELECT id FROM leads ORDER BY id DESC LIMIT 1")
     e._alert(MON_10AM, "test", row["id"], "subj", "body")
@@ -386,3 +387,115 @@ def test_control_api_needs_secret_and_validates():
     assert c.post("/api/control", json={"action": "explode"}, headers=h).status_code == 422
     assert c.post("/api/control", json={"action": "pause"}, headers=h).json()["state"] == "paused"
     assert c.get("/api/console", headers=h).json()["control"]["state"] == "paused"
+
+
+# ---- settings, availability, reports, reminders, export, follow-up
+from juvelcall import ops
+
+
+def test_settings_change_hours_and_validate():
+    e, s, d, n = mk()
+    with pytest.raises(ValueError):
+        ops.save_settings(e, {"hours": {"mon": ["10:00", "09:00"]}}, MON_10AM, "t")
+    with pytest.raises(ValueError):
+        ops.save_settings(e, {"campuses": {"ecr": {"counselors": [{"name": "A", "number": "123"}]}}}, MON_10AM, "t")
+    ops.save_settings(e, {"hours": {d: ["09:00", "12:00"] for d in ["mon", "tue", "wed", "thu", "fri"]}}, MON_10AM, "Priya")
+    assert not in_hours(MON_10AM.replace(hour=13), e.c, IST) and in_hours(MON_10AM, e.c, IST)
+    assert not in_hours(datetime(2026, 10, 24, 10, 0, tzinfo=IST), e.c, IST)        # Saturday now closed
+    assert ops.hours_label(e.c) == "Mon–Fri 9:00–12:00"
+    assert s.one("SELECT who FROM audit WHERE action='settings'")["who"] == "Priya"
+
+
+def test_settings_survive_restart_and_change_counselor():
+    e, s, d, n = mk()
+    ops.save_settings(e, {"campuses": {"ecr": {"counselors": [{"name": "Meera", "number": "9840922615"}]}}}, MON_10AM, "t")
+    e2 = Engine(Config(__import__("copy").deepcopy(cfg.data)), s, d, n)             # new process, same database
+    e2.ingest([lead()], MON_10AM)
+    e2.tick(MON_10AM)
+    assert d.calls[-1].counselor_numbers == ["+919840922615"] and d.calls[-1].counselor_name == "Meera"
+
+
+def test_no_counselor_on_duty_leaves_lead_waiting_and_alerts():
+    e, s, d, n = mk()
+    ops.save_settings(e, {"campuses": {"ecr": {"counselors": [{"name": "Vidya", "number": "7550033275", "on_duty": False}]}}},
+                      MON_10AM, "t")
+    e.ingest([lead()], MON_10AM)
+    assert e.tick(MON_10AM) == [] and not d.calls
+    e.tick(MON_10AM + timedelta(minutes=15))
+    assert any("no call was placed" in x[1] for x in n.sent)
+    ops.save_settings(e, {"campuses": {"ecr": {"counselors": [{"name": "Vidya", "number": "7550033275", "on_duty": True}]}}},
+                      MON_10AM, "t")
+    assert len(e.tick(MON_10AM + timedelta(minutes=16))) == 1
+
+
+def test_daily_summary_sent_once_after_close():
+    e, s, d, n = mk()
+    e.ingest([lead()], MON_10AM)
+    e.tick(MON_10AM)
+    before = MON_10AM.replace(hour=14, minute=40)
+    assert "daily_summary" not in ops.periodic(e, before)                              # closes 14:30 + 30 min
+    after = MON_10AM.replace(hour=15, minute=5)
+    assert ops.periodic(e, after).get("daily_summary") is True
+    assert "daily_summary" not in ops.periodic(e, after + timedelta(minutes=1))
+    assert any("summary, ECR" in x[1] for x in n.sent) and any("summary, T Nagar" in x[1] for x in n.sent)
+
+
+def test_weekly_report_on_saturday_only():
+    e, s, d, n = mk()
+    sat = datetime(2026, 10, 24, 14, 40, tzinfo=IST)
+    assert ops.periodic(e, sat).get("weekly_report") is True
+    assert "weekly_report" not in ops.periodic(e, sat + timedelta(minutes=1))
+    e2, *_ = mk()
+    assert "weekly_report" not in ops.periodic(e2, MON_10AM.replace(hour=15, minute=5))
+
+
+def test_callback_reminders_then_stop_after_done():
+    e, s, d, n = mk()
+    e.ingest([lead()], MON_10AM)
+    ref = e.tick(MON_10AM)[0]
+    e.handle_event(CallEvent(ref, EventKind.TRANSFER_FAILED), MON_10AM)
+    n.sent.clear()
+    assert ops.periodic(e, MON_10AM + timedelta(minutes=30)).get("reminders") == 0
+    assert ops.periodic(e, MON_10AM + timedelta(minutes=61)).get("reminders") == 1
+    assert ops.periodic(e, MON_10AM + timedelta(minutes=62)).get("reminders") == 0      # not repeated
+    assert ops.periodic(e, MON_10AM + timedelta(minutes=241)).get("reminders") == 1     # second reminder
+    lid = s.one("SELECT id FROM leads")["id"]
+    e.resolve(lid, MON_10AM + timedelta(minutes=242), who="Viji")
+    assert ops.periodic(e, MON_10AM + timedelta(minutes=243)).get("reminders") == 0
+
+
+def test_export_and_search():
+    e, s, d, n = mk()
+    e.ingest([lead(phone="9840922615")], MON_10AM)
+    csvtext = ops.export_csv(e, None, MON_10AM)
+    assert "+919840922615" in csvtext and csvtext.startswith("Time,Parent")
+    assert ops.search(e, "0922615")[0]["phone"].startswith("+91")
+    assert "9840922615" not in ops.search(e, "Asha")[0]["phone"]                          # masked in search
+    assert ops.search(e, "ab") == []
+
+
+def test_parent_followup_is_off_by_default_and_works_when_enabled():
+    e, s, d, n = mk()
+    e.ingest([lead()], MON_10AM)
+    ref = e.tick(MON_10AM)[0]
+    e.handle_event(CallEvent(ref, EventKind.TRANSFER_FAILED), MON_10AM)
+    assert n.events == []
+    e2, s2, d2, n2 = mk()
+    e2.cfg.notifications["parent_followup"] = {"enabled": True, "text_callback": "Hi {parent_name}, {school_name} will call you back."}
+    e2.ingest([lead()], MON_10AM)
+    ref = e2.tick(MON_10AM)[0]
+    e2.handle_event(CallEvent(ref, EventKind.TRANSFER_FAILED), MON_10AM)
+    assert n2.events[0][0] == "parent_message" and "will call you back" in n2.events[0][1]["text"]
+
+
+def test_new_api_endpoints_need_secret():
+    e, s, d, n = mk()
+    c = TestClient(create_app(e, clock=lambda: MON_10AM))
+    h = {"X-Webhook-Secret": cfg.security["webhook_secret"]}
+    for path in ["/api/settings", "/api/audit", "/api/search?q=abc", "/api/export"]:
+        assert c.get(path).status_code == 401
+        assert c.get(path, headers=h).status_code == 200
+    r = c.put("/api/settings", json={"max_attempts": 9, "by": "x"}, headers=h)
+    assert r.status_code == 422
+    r = c.put("/api/settings", json={"max_attempts": 3, "by": "x"}, headers=h)
+    assert r.json()["max_attempts"] == 3

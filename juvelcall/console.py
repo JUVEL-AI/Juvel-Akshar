@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import Counter
 from datetime import datetime, timedelta
 
+from . import ops
 from .store import parse
 
 
@@ -46,6 +47,11 @@ def build(engine, now: datetime, day: str | None = None) -> dict:
                  ("ANSWERED_NOT_TRANSFERRED", "NEEDS_REVIEW", "NO_RESPONSE", "INVALID_PHONE", "STALE")]
     return {
         "generated_at": now.isoformat(), "day": day_start.date().isoformat(), "control": engine.control_info(),
+        "hours_label": ops.hours_label(cfg.calling),
+        "campus_status": {k: {"label": v["label"], "on_duty": (engine._on_duty(k) or {}).get("name"),
+                              "counselors": [{"name": c["name"], "number": (c["numbers"] or [""])[0],
+                                              "on_duty": c.get("on_duty", True)} for c in v["counselors"]]}
+                          for k, v in cfg.campuses.items()},
         "campuses": {k: v["label"] for k, v in cfg.campuses.items()},
         "kpis": {"enquiries": len(leads), "called": len(called),
                  "called_within_5_min_pct": round(fast * 100 / len(called)) if called else 0,

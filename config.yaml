@@ -21,6 +21,7 @@ calling:
   stale_after_hours: 48                    # older leads are not auto-called
   dedupe_window_hours: 72                  # same phone inside this window = duplicate
   alert_if_not_called_after_minutes: 10    # inquiry arrived, no call placed
+  callback_reminder_minutes: [60, 240]     # email again if a call-back is still not marked done
   max_call_seconds: 300                    # school: no call beyond 5 minutes
 
 campuses:
@@ -53,6 +54,12 @@ messages:
 
 notifications:
   admin_emails: ["admissions.tng@akshararbol.edu.in", "admissions.ecr@akshararbol.edu.in", "bragadeeshsundararajan@gmail.com"]   # fallback + copies; each campus also has its own alert_emails
+  report_minutes_after_close: 30           # daily summary email goes out this long after calling hours end
+  parent_followup:                         # optional message to the parent via Make (e.g. WhatsApp). OFF until the school agrees
+    enabled: false
+    channel: whatsapp
+    text_callback: "Thank you for your interest in {school_name}. Our admissions team will call you back shortly."
+    text_no_response: "We tried to reach you about your admission enquiry at {school_name}. Please reply with a good time to call and our admissions team will ring you."
   webhook_url: ${MAKE_EMAIL_WEBHOOK}       # Make.com webhook that sends the email; empty = use SMTP below
   smtp:                                    # leave host empty to log instead of sending
     host: ${SMTP_HOST}                     # e.g. smtp.gmail.com

@@ -8,6 +8,10 @@ export const SAMPLE: ConsoleData = {
   generated_at: new Date().toISOString(), day: "sample",
   campuses: { ecr: "ECR", t_nagar: "T Nagar" },
   control: { state: "running", changed_at: "", by: "" },
+  hours_label: "Mon–Fri 8:30–2:30 · Sat 9:00–2:00",
+  campus_status: {
+    ecr: { label: "ECR", on_duty: "Vidya", counselors: [{ name: "Vidya", number: "+917550033275", on_duty: true }] },
+    t_nagar: { label: "T Nagar", on_duty: "Viji", counselors: [{ name: "Viji", number: "+917305972752", on_duty: true }] } },
   leads: [
     L(12, "13:55", "Harini V", "Myra", "LKG", "ecr", "+91 99••• ••412", "RETRY", 2, 80),
     L(11, "13:22", "Nithya P", "Aadhi", "2nd grade", "t_nagar", "+91 97••• ••859", "TRANSFERRED", 1, 69),

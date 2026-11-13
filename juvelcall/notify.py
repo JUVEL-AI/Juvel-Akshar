@@ -8,6 +8,10 @@ log = logging.getLogger("juvelcall.notify")
 
 class Notifier:
     """Base: logs only."""
+    def post_event(self, kind: str, payload: dict) -> bool:
+        """Non-email events (e.g. a WhatsApp follow-up for Make to send). Base class does nothing."""
+        return False
+
     def send(self, to: list[str], subject: str, body: str) -> bool:
         log.warning("ALERT to=%s subject=%s\n%s", to, subject, body)
         return True
@@ -16,6 +20,11 @@ class Notifier:
 class MemoryNotifier(Notifier):
     def __init__(self):
         self.sent: list[tuple[list[str], str, str]] = []
+        self.events: list[tuple[str, dict]] = []
+
+    def post_event(self, kind, payload):
+        self.events.append((kind, payload))
+        return True
 
     def send(self, to, subject, body):
         self.sent.append((to, subject, body))
@@ -51,7 +60,7 @@ class WebhookNotifier(Notifier):
     def send(self, to, subject, body):
         try:
             import requests
-            r = requests.post(self.url, json={"to": to, "to_text": ", ".join(to),
+            r = requests.post(self.url, json={"kind": "email", "to": to, "to_text": ", ".join(to),
                                               "subject": subject, "body": body}, timeout=self.timeout)
             if r.status_code < 300:
                 return True
@@ -59,6 +68,15 @@ class WebhookNotifier(Notifier):
         except Exception as e:
             log.error("email webhook failed: %s", e)
         return self.fallback.send(to, subject, body) if self.fallback else False
+
+    def post_event(self, kind, payload):
+        try:
+            import requests
+            r = requests.post(self.url, json={"kind": kind, **payload}, timeout=self.timeout)
+            return r.status_code < 300
+        except Exception as e:
+            log.error("event webhook failed: %s", e)
+            return False
 
 
 def notifier_from_config(cfg) -> Notifier:

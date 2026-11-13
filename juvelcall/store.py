@@ -28,6 +28,9 @@ CREATE TABLE IF NOT EXISTS alerts(
 );
 CREATE TABLE IF NOT EXISTS dnc(phone TEXT PRIMARY KEY, added_at TEXT, reason TEXT);
 CREATE TABLE IF NOT EXISTS kv(k TEXT PRIMARY KEY, v TEXT);
+CREATE TABLE IF NOT EXISTS audit(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT, who TEXT, action TEXT, detail TEXT
+);
 """
 
 
@@ -97,6 +100,9 @@ class Store:
     def add_alert(self, now: datetime, kind: str, lead_id: int | None, subject: str, body: str) -> int:
         return self.insert("INSERT INTO alerts(created_at,kind,lead_id,subject,body) VALUES(?,?,?,?,?)",
                            (iso(now), kind, lead_id, subject, body))
+
+    def add_audit(self, now: datetime, who: str, action: str, detail: str = "") -> None:
+        self.x("INSERT INTO audit(created_at,who,action,detail) VALUES(?,?,?,?)", (iso(now), who or "system", action, detail[:500]))
 
     def kv_get(self, k: str) -> str | None:
         r = self.one("SELECT v FROM kv WHERE k=?", (k,))
