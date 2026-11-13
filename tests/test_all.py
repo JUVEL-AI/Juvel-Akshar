@@ -319,3 +319,19 @@ def test_alert_goes_to_campus_inbox():
     row = s.one("SELECT id FROM leads ORDER BY id DESC LIMIT 1")
     e._alert(MON_10AM, "test", row["id"], "subj", "body")
     assert n.sent[-1][0] == ["ecr-inbox@example.com"]
+
+
+def test_webhook_notifier_posts_and_falls_back(monkeypatch):
+    import requests
+    from juvelcall.notify import WebhookNotifier, MemoryNotifier
+    calls = []
+
+    class R:  # fake response
+        def __init__(self, code): self.status_code = code
+    monkeypatch.setattr(requests, "post", lambda url, json=None, timeout=0: (calls.append((url, json)), R(200))[1])
+    assert WebhookNotifier("https://hook.example/x").send(["a@x.com"], "S", "B")
+    assert calls[0][1]["subject"] == "S" and calls[0][1]["to"] == ["a@x.com"]
+    monkeypatch.setattr(requests, "post", lambda *a, **k: R(500))
+    fb = MemoryNotifier()
+    assert WebhookNotifier("https://hook.example/x", fallback=fb).send(["a@x.com"], "S", "B")
+    assert fb.sent

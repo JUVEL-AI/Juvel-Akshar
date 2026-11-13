@@ -42,9 +42,32 @@ class SmtpNotifier(Notifier):
             return False
 
 
+class WebhookNotifier(Notifier):
+    """POSTs each alert as JSON to a webhook (e.g. a Make.com scenario that sends the email).
+    If the webhook fails and a fallback notifier exists (SMTP), the fallback is tried."""
+    def __init__(self, url: str, fallback: "Notifier | None" = None, timeout: int = 15):
+        self.url, self.fallback, self.timeout = url, fallback, timeout
+
+    def send(self, to, subject, body):
+        try:
+            import requests
+            r = requests.post(self.url, json={"to": to, "to_text": ", ".join(to),
+                                              "subject": subject, "body": body}, timeout=self.timeout)
+            if r.status_code < 300:
+                return True
+            log.error("email webhook returned %s", r.status_code)
+        except Exception as e:
+            log.error("email webhook failed: %s", e)
+        return self.fallback.send(to, subject, body) if self.fallback else False
+
+
 def notifier_from_config(cfg) -> Notifier:
-    smtp = (cfg.notifications or {}).get("smtp") or {}
+    n = cfg.notifications or {}
+    smtp = n.get("smtp") or {}
+    base: Notifier = Notifier()
     if smtp.get("host"):
-        return SmtpNotifier(smtp["host"], smtp.get("port", 587), smtp.get("user", ""),
+        base = SmtpNotifier(smtp["host"], smtp.get("port", 587), smtp.get("user", ""),
                             smtp.get("password", ""), smtp.get("sender", "alerts@localhost"))
-    return Notifier()
+    if n.get("webhook_url"):
+        return WebhookNotifier(n["webhook_url"], fallback=base if smtp.get("host") else None)
+    return base

@@ -53,6 +53,7 @@ messages:
 
 notifications:
   admin_emails: ["admissions.tng@akshararbol.edu.in", "admissions.ecr@akshararbol.edu.in", "bragadeeshsundararajan@gmail.com"]   # fallback + copies; each campus also has its own alert_emails
+  webhook_url: ${MAKE_EMAIL_WEBHOOK}       # Make.com webhook that sends the email; empty = use SMTP below
   smtp:                                    # leave host empty to log instead of sending
     host: ${SMTP_HOST}                     # e.g. smtp.gmail.com
     port: 587
