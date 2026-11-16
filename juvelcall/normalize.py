@@ -56,7 +56,7 @@ def clean_grade(raw: str) -> str:
     """Return a spoken-friendly class, or '' when unclear (e.g. a school name in the grade column)."""
     if not raw:
         return ""
-    t = re.sub(r"\s+", " ", raw.strip().lower().replace("_", " "))
+    t = re.sub(r"\s+", " ", raw.strip().lower().replace("_", " ").replace("-", " "))
     for k, v in _GRADE_WORDS.items():
         if re.fullmatch(rf"(class |grade |std )?{re.escape(k)}", t):
             return v

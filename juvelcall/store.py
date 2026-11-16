@@ -62,6 +62,21 @@ class Store:
             self.db = sqlite3.connect(path, check_same_thread=False)
             self.db.row_factory = sqlite3.Row
             self.db.executescript(SCHEMA)
+        self._migrate()
+
+    CALL_COLS = {"recording_url": "TEXT", "transcript": "TEXT", "summary": "TEXT",
+                 "duration_seconds": "INTEGER", "cost": "REAL", "ended_reason": "TEXT"}
+
+    def _migrate(self) -> None:
+        """Adds the call-record columns to databases created before they existed."""
+        for col, typ in self.CALL_COLS.items():
+            try:
+                if self.pg:
+                    self.db.execute(f"ALTER TABLE calls ADD COLUMN IF NOT EXISTS {col} {typ}")
+                else:
+                    self.db.execute(f"ALTER TABLE calls ADD COLUMN {col} {typ}")
+            except Exception:
+                pass                                        # column already there
 
     def _sql(self, sql: str) -> str:
         if not self.pg:

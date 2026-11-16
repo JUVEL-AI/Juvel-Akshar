@@ -6,7 +6,7 @@ from .csv_source import lead_from_row
 
 
 def read_sheet(service_account_json: "str | dict", spreadsheet_id: str, worksheet: str, cols: dict,
-               tz: ZoneInfo, source: str = "meta_sheet") -> list[RawLead]:
+               tz: ZoneInfo, source: str = "meta_sheet", date_order: str = "mdy") -> list[RawLead]:
     import gspread
     import json as _json
     if isinstance(service_account_json, dict) or str(service_account_json).lstrip().startswith("{"):
@@ -18,7 +18,7 @@ def read_sheet(service_account_json: "str | dict", spreadsheet_id: str, workshee
     out = []
     for i, row in enumerate(ws.get_all_records(), start=2):
         try:
-            out.append(lead_from_row(row, cols, tz, source, f"row {i}"))
+            out.append(lead_from_row(row, cols, tz, source, f"row {i}", date_order))
         except Exception:
             continue
     return out

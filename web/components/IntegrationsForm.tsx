@@ -7,6 +7,7 @@ const FIELDS: { k: keyof Omit<IntegData, "live">; label: string; secret?: boolea
   { k: "vapi_phone_number_id", label: "Vapi phone number ID", ph: "e.g. 8f3c…", hint: "Vapi dashboard > Phone Numbers > click your Vobiz number > copy its ID." },
   { k: "vapi_server_secret", label: "Vapi webhook secret", secret: true, ph: "a long random value", hint: "Any long random value. Put the same value in Vapi as the x-vapi-secret header for the server URL." },
   { k: "vapi_voice_id", label: "Voice (ElevenLabs voice ID)", ph: "e.g. a voice ID from ElevenLabs", hint: "Pick a female Indian-English voice in ElevenLabs, copy its Voice ID. In Vapi, add your ElevenLabs key under Providers first. Empty = Vapi's default voice." },
+  { k: "vapi_transfer_style", label: "Transfer style", ph: "blind", hint: "blind = connects the parent with no message (tested, working). assistant = tells the counselor the parent's name and class before connecting (test it first)." },
   { k: "caller_id", label: "Calling number (Vobiz)", ph: "+914440001111", hint: "The Vobiz number parents see. It must not be a counselor's own number." },
 ];
 
@@ -49,8 +50,14 @@ export default function IntegrationsForm({ initial }: { initial: IntegData | nul
           <div className="int-row" key={f.k}>
             <label htmlFor={f.k}><b>{f.label}</b><div className="sub">{cur.set ? <>Saved: <span className="mono">{cur.value}</span>{cur.from ? ` · ${cur.from}` : ""}</> : "Not set"}</div></label>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <input id={f.k} type={f.secret ? "password" : "text"} autoComplete="off" placeholder={cur.set ? "enter a new value to replace" : f.ph}
-                value={vals[f.k] ?? ""} onChange={(e) => setVals({ ...vals, [f.k]: e.target.value })} style={{ flex: "1 1 240px" }} />
+              {f.k === "vapi_transfer_style" ? (
+                <select id={f.k} value={vals[f.k] ?? ""} onChange={(e) => setVals({ ...vals, [f.k]: e.target.value })} style={{ flex: "1 1 240px", minHeight: 44, borderRadius: 10, background: "var(--bg)", color: "var(--text)", border: "1px solid var(--line)", padding: "0 10px" }}>
+                  <option value="">Keep current ({cur.value || "blind"})</option>
+                  <option value="blind">blind: no message to the counselor</option>
+                  <option value="assistant">assistant: counselor hears the parent's name</option>
+                </select>
+              ) : <input id={f.k} type={f.secret ? "password" : "text"} autoComplete="off" placeholder={cur.set ? "enter a new value to replace" : f.ph}
+                value={vals[f.k] ?? ""} onChange={(e) => setVals({ ...vals, [f.k]: e.target.value })} style={{ flex: "1 1 240px" }} />}
               {cur.from === "dashboard" && <button className="cbtn" disabled={busy} onClick={() => clear(f.k)}>Remove</button>}
             </div>
             <div className="hint">{f.hint}</div>

@@ -316,6 +316,19 @@ export default function Console({ data, demo, error, pinRequired = false, role =
                 </div>
               </div>
               <div>
+                <div className="eyebrow">Call records</div>
+                {(sel.calls ?? []).length === 0 && <div className="sub" style={{ marginTop: 6 }}>No call has been placed for this enquiry yet.</div>}
+                {(sel.calls ?? []).map((k, i) => (
+                  <div className="say2" key={i} style={{ marginTop: 10 }}>
+                    <b>ATTEMPT {k.attempt} · {k.at}{k.seconds != null ? ` · ${Math.floor(k.seconds / 60)}m ${k.seconds % 60}s` : ""}</b>
+                    <p className="sub" style={{ margin: "4px 0" }}>{k.reason ? `Result: ${k.reason.replace(/-/g, " ")}` : k.outcome || "In progress"}</p>
+                    {data.records_hidden && <p className="sub" style={{ margin: "4px 0" }}>Recordings and transcripts are available to admins only.</p>}
+                    {k.summary && <p style={{ margin: "4px 0" }}>{k.summary}</p>}
+                    {k.recording && <audio controls preload="none" src={k.recording} style={{ width: "100%", marginTop: 6 }} />}
+                    {k.transcript && <details style={{ marginTop: 6 }}><summary style={{ cursor: "pointer" }}>Transcript</summary><p style={{ whiteSpace: "pre-wrap", marginTop: 6 }}>{k.transcript}</p></details>}
+                  </div>))}
+              </div>
+              <div>
                 <div className="eyebrow">What each person hears</div>
                 <div className="say2"><b style={{ color: "#6AA7FF" }}>PARENT</b><p>Hello, calling from Akshar Arbol International School regarding your registration. Your counselor from the admissions team will speak with you now. Please stay on the line.</p></div>
                 <div className="say2"><b style={{ color: "#3DDC97" }}>COUNSELOR (BEFORE CONNECTING)</b><p>{whisperFor(sel, label(sel.campus))}</p></div>

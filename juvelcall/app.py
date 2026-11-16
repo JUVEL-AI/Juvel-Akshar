@@ -142,6 +142,18 @@ def create_app(engine: Engine, clock=now_utc, run_loop: bool = False, loop_secon
             # parent answered but we never saw a forward = treat as needs-callback; hard errors = FAILED
             answered = not reason.startswith(("twilio-failed", "pipeline-error", "call.start.error", "phone-call-provider"))
             kind = EventKind.TRANSFER_FAILED if (answered and reason.endswith("ended-call")) else EventKind.FAILED
+        art = msg.get("artifact") or {}
+        try:                                         # keep recording, transcript and summary with the call, never block the result
+            dur = msg.get("durationSeconds")
+            engine.store.x(
+                "UPDATE calls SET recording_url=?, transcript=?, summary=?, duration_seconds=?, cost=?, ended_reason=? WHERE call_ref=?",
+                (str(art.get("recordingUrl") or msg.get("recordingUrl") or "")[:600],
+                 str(art.get("transcript") or msg.get("transcript") or "")[:20000],
+                 str((msg.get("analysis") or {}).get("summary") or msg.get("summary") or "")[:3000],
+                 int(round(float(dur))) if dur is not None else None,
+                 float(msg["cost"]) if msg.get("cost") is not None else None, reason[:120], ref))
+        except Exception:
+            pass
         res = engine.handle_event(CallEvent(ref, kind, msg.get("call", {}).get("id", ""), "", reason), clock())
         engine.tick(clock())
         return {"result": res, "mapped": kind.value}

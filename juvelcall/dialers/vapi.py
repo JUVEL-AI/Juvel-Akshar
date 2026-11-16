@@ -74,6 +74,8 @@ class VapiDialer(Dialer):
             assistant["firstMessageMode"] = "assistant-speaks-first-with-model-generated-message"
         else:
             assistant["firstMessage"] = p.greeting_text
+        assistant["artifactPlan"] = {"recordingEnabled": True}
+        assistant["serverMessages"] = ["end-of-call-report"]
         if self.voice_id:                      # a chosen voice (ElevenLabs by default); empty = Vapi's default voice
             v = {"provider": self.voice_provider, "voiceId": self.voice_id}
             if self.voice_provider == "11labs":

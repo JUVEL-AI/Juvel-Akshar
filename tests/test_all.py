@@ -690,3 +690,29 @@ def test_vapi_forwarding_failure_is_not_a_transfer():
     r = client.post("/webhooks/vapi", headers={"x-vapi-secret": "vapi-test"}, json={"message": {
         "type": "end-of-call-report", "endedReason": "call.forwarding.no-answer", "call": {"id": "x", "metadata": {"call_ref": ref}}}})
     assert r.json()["mapped"] == "TRANSFER_FAILED"
+
+
+def test_call_records_saved_and_shown():
+    e, s, d, n = mk()
+    client = TestClient(create_app(e, clock=lambda: MON_10AM))
+    e.ingest([lead()], MON_10AM); e.tick(MON_10AM)
+    ref = d.calls[0].call_ref
+    client.post("/webhooks/vapi", headers={"x-vapi-secret": "vapi-test"}, json={"message": {
+        "type": "end-of-call-report", "endedReason": "assistant-forwarded-call", "durationSeconds": 41.6, "cost": 0.04,
+        "artifact": {"recordingUrl": "https://example.com/r.wav", "transcript": "AI: Hello"},
+        "analysis": {"summary": "Parent was connected."}, "call": {"id": "v1", "metadata": {"call_ref": ref}}}})
+    from juvelcall import console
+    out = console.build(e, MON_10AM)
+    c = out["leads"][0]["calls"][0]
+    assert c["recording"] == "https://example.com/r.wav" and c["seconds"] == 42 and "connected" in c["summary"] and "Hello" in c["transcript"]
+    ops.snapshot_base(e)
+    assert ops.save_integrations(e, {"vapi_transfer_style": "assistant"}, MON_10AM, "juvel")["vapi_transfer_style"]["value"] == "assistant"
+
+
+def test_records_visibility_setting():
+    e, s, d, n = mk()
+    from juvelcall import console
+    ops.snapshot_base(e)
+    assert console.build(e, MON_10AM)["records_staff"] is False
+    ops.save_settings(e, {"records_staff": True}, MON_10AM, "juvel")
+    assert console.build(e, MON_10AM)["records_staff"] is True and ops.effective_settings(e)["records_staff"] is True

@@ -25,6 +25,16 @@ def build(engine, now: datetime, day: str | None = None) -> dict:
     calls = {}
     for c in store.q("SELECT lead_id, MIN(started_at) first_at, MAX(attempt) n FROM calls GROUP BY lead_id"):
         calls[c["lead_id"]] = c
+    recs: dict = {}
+    ids = [r["id"] for r in rows]
+    if ids:
+        for k in store.q("SELECT * FROM calls WHERE lead_id IN (%s) ORDER BY started_at" % ",".join("?" * len(ids)), tuple(ids)):
+            st = parse(k["started_at"])
+            recs.setdefault(k["lead_id"], []).append({
+                "attempt": k["attempt"], "at": st.astimezone(cfg.tz).strftime("%d %b %H:%M") if st else "",
+                "outcome": k["outcome"] or "", "seconds": k["duration_seconds"], "reason": k["ended_reason"] or "",
+                "recording": k["recording_url"] or "", "summary": k["summary"] or "",
+                "transcript": (k["transcript"] or "")[:6000], "detail": k["detail"] or ""})
     leads = []
     for r in rows:
         created = parse(r["created_at"])
@@ -37,7 +47,7 @@ def build(engine, now: datetime, day: str | None = None) -> dict:
             "parent": r["name"] or "", "student": r["student_name"] or "", "class": r["grade"] or "",
             "campus": r["campus"] or "", "phone": mask(r["phone"]), "status": r["status"],
             "attempts": r["attempts"], "first_call_seconds": first, "note": r["note"] or "",
-            "transferred_to": r["transferred_to"] or ""})
+            "transferred_to": r["transferred_to"] or "", "calls": recs.get(r["id"], [])})
     cnt = Counter(l["status"] for l in leads)
     called = [l for l in leads if l["first_call_seconds"] is not None]
     fast = sum(1 for l in called if l["first_call_seconds"] <= 300)
@@ -47,6 +57,7 @@ def build(engine, now: datetime, day: str | None = None) -> dict:
                  ("ANSWERED_NOT_TRANSFERRED", "NEEDS_REVIEW", "NO_RESPONSE", "INVALID_PHONE", "STALE")]
     return {
         "generated_at": now.isoformat(), "day": day_start.date().isoformat(), "control": engine.control_info(),
+        "records_staff": bool(ops._stored(engine).get("records_staff", False)),
         "hours_label": ops.hours_label(cfg.calling),
         "campus_status": {k: {"label": v["label"], "on_duty": (engine._on_duty(k) or {}).get("name"),
                               "counselors": [{"name": c["name"], "number": (c["numbers"] or [""])[0],

@@ -17,6 +17,10 @@ def run_check(cfg) -> int:
         for n in nums:
             if not E164.match(n) or n.startswith("+9100000"):
                 problems.append(f"campus {k}: number {n} is a placeholder / not valid")
+        calling = {clean_phone(x["caller_id"]) for x in cfg.campuses.values() if x.get("caller_id")}
+        for n in nums[1:]:
+            if clean_phone(n) in calling:
+                problems.append(f"campus {k}: counselor/backup number {n} is the same as the calling number (would loop)")
     d = cfg.dialer
     t = d.get("type", "mock")
     if t == "mock":

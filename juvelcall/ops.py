@@ -61,6 +61,8 @@ def apply_overrides(engine) -> None:
     dialer = copy.deepcopy(base["dialer"])
     if integ.get("vapi_voice_id"):
         v = dict(dialer.get("vapi") or {}); v["voice_id"] = integ["vapi_voice_id"]; dialer["vapi"] = v
+    if integ.get("vapi_transfer_style") in ("blind", "assistant"):
+        v = dict(dialer.get("vapi") or {}); v["transfer_style"] = integ["vapi_transfer_style"]; dialer["vapi"] = v
     if integ.get("caller_id"):
         for c in campuses.values():
             c["caller_id"] = integ["caller_id"]
@@ -85,7 +87,7 @@ def apply_overrides(engine) -> None:
 
 # ---------------- integrations (Vapi / Vobiz), admin only ----------------
 SECRET_KEYS = ("vapi_api_key", "vapi_server_secret")
-INTEG_KEYS = ("vapi_api_key", "vapi_phone_number_id", "vapi_server_secret", "caller_id", "vapi_voice_id")
+INTEG_KEYS = ("vapi_api_key", "vapi_phone_number_id", "vapi_server_secret", "caller_id", "vapi_voice_id", "vapi_transfer_style")
 
 
 def _integrations(engine) -> dict:
@@ -106,7 +108,7 @@ def integrations_view(engine) -> dict:
     caller = next((c.get("caller_id", "") for c in cfg.campuses.values()), "")
     eff = {"vapi_api_key": v.get("api_key", ""), "vapi_phone_number_id": v.get("phone_number_id", ""),
            "vapi_server_secret": v.get("server_secret", ""), "caller_id": caller,
-           "vapi_voice_id": v.get("voice_id", "")}
+           "vapi_voice_id": v.get("voice_id", ""), "vapi_transfer_style": v.get("transfer_style", "blind")}
     out = {}
     for k in INTEG_KEYS:
         val = eff[k] or ""
@@ -133,9 +135,12 @@ def save_integrations(engine, payload: dict, now: datetime, who: str) -> dict:
             if n in counselors:
                 raise ValueError("The calling number cannot be the same as a counselor's number")
             val = n
+        elif k == "vapi_transfer_style":
+            if val not in ("blind", "assistant"):
+                raise ValueError("Transfer style must be 'blind' or 'assistant'")
         elif any(ch.isspace() for ch in val):
             raise ValueError(f"{k.replace('_', ' ')}: remove the spaces")
-        if k.startswith("vapi_") and k != "vapi_voice_id" and len(val) < 8:
+        if k.startswith("vapi_") and k not in ("vapi_voice_id", "vapi_transfer_style") and len(val) < 8:
             raise ValueError(f"{k.replace('_', ' ')} looks too short")
         st[k] = val
         changed.append(k)
@@ -208,6 +213,7 @@ def effective_settings(engine) -> dict:
                                          "on_duty": c.get("on_duty", True)} for c in v["counselors"]]}
                      for k, v in cfg.campuses.items()},
         "admin_emails": list(cfg.notifications.get("admin_emails", [])),
+        "records_staff": bool(_stored(engine).get("records_staff", False)),
     }
 
 
@@ -240,6 +246,8 @@ def validate_settings(engine, payload: dict) -> dict:
                 or not all(isinstance(x, int) and 1 <= x <= 1440 for x in r)):
             raise ValueError("Retry gaps must be 1 to 5 whole numbers of minutes (1 to 1440)")
         out["retry_minutes"] = r
+    if "records_staff" in payload:
+        out["records_staff"] = bool(payload["records_staff"])
     if "campuses" in payload:
         camps = {}
         for key, ov in (payload["campuses"] or {}).items():

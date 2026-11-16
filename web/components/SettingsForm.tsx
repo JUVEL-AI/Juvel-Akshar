@@ -17,7 +17,7 @@ export default function SettingsForm({ initial, audit }: { initial: SettingsData
   const save = async () => {
     setBusy(true); setMsg(null);
     const r = await fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
-      hours: s.hours, max_attempts: s.max_attempts, retry_minutes: s.retry_minutes,
+      hours: s.hours, max_attempts: s.max_attempts, retry_minutes: s.retry_minutes, records_staff: !!s.records_staff,
       campuses: Object.fromEntries(Object.entries(s.campuses).map(([k, c]) => [k, { alert_emails: c.alert_emails, counselors: c.counselors }])) }) });
     const j = await r.json().catch(() => ({}));
     if (r.ok) { setS(j.settings); setMsg({ ok: true, text: "Saved. New settings apply to the next call." }); }
@@ -60,6 +60,15 @@ export default function SettingsForm({ initial, audit }: { initial: SettingsData
           </label>
         </section>
       ))}
+
+      <section className="card set">
+        <h2>Call recordings</h2>
+        <p className="sub">Recordings, transcripts and summaries are visible to admins only. Tick this to let staff logins hear and read them too.</p>
+        <label className="set-col" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <input type="checkbox" checked={!!s.records_staff} onChange={(e) => setS({ ...s, records_staff: e.target.checked })} />
+          Let staff hear recordings and read transcripts
+        </label>
+      </section>
 
       <section className="card set">
         <h2>Retries</h2>
