@@ -615,17 +615,17 @@ def test_vapi_payload_styles():
     e, s, d, n = mk()
     e.ingest([lead()], MON_10AM); e.tick(MON_10AM)
     plan = d.calls[0]
-    new = VapiDialer("k", "pn").build_payload(plan)["assistant"]
-    tool = new["model"]["tools"][0]
-    assert "transferPlan" not in tool                                   # lives inside the destination
+    b = VapiDialer("k", "pn").build_payload(plan)["assistant"]                   # default = the blind style tested live
+    tool = b["model"]["tools"][0]
     dest = tool["destinations"][0]
-    assert dest["transferPlan"]["mode"] == "warm-transfer-experimental" and dest["transferPlan"]["sipVerb"] == "dial"
-    assert dest["transferPlan"]["transferAssistant"]["firstMessage"] == plan.whisper_text and dest["message"] == plan.greeting_text
-    assert "firstMessage" not in new and new["firstMessageMode"].startswith("assistant-speaks-first-with")
+    assert dest["transferPlan"]["mode"] == "blind-transfer" and dest["transferPlan"]["sipVerb"] == "dial"
+    assert dest["transferPlan"]["fallbackPlan"]["message"] == plan.fallback_text
+    assert tool["messages"][0] == {"type": "request-start", "content": plan.greeting_text, "blocking": True}
+    assert "firstMessage" not in b and b["firstMessageMode"].startswith("assistant-speaks-first-with")
+    a = VapiDialer("k", "pn", transfer_style="assistant").build_payload(plan)["assistant"]["model"]["tools"][0]["destinations"][0]
+    assert a["transferPlan"]["mode"] == "warm-transfer-experimental" and a["transferPlan"]["transferAssistant"]["firstMessage"] == plan.whisper_text
     old = VapiDialer("k", "pn", transfer_style="legacy").build_payload(plan)["assistant"]
     assert old["firstMessage"] == plan.greeting_text and old["model"]["tools"][0]["destinations"][0]["transferPlan"]["mode"] == "warm-transfer-say-message"
-    wait = VapiDialer("k", "pn", immediate_transfer=False).build_payload(plan)["assistant"]
-    assert wait["firstMessage"] == plan.greeting_text
 
 
 def test_vapi_falls_back_when_new_settings_rejected(monkeypatch):
@@ -642,7 +642,7 @@ def test_vapi_falls_back_when_new_settings_rejected(monkeypatch):
         seen.append(json["assistant"].get("firstMessage"))
         return R(400, "bad transferPlan") if len(seen) == 1 else R(201, "", {"id": "call-1"})
     monkeypatch.setattr(requests, "post", fake)
-    assert VapiDialer("k", "pn").place_call(plan) == "call-1" and seen[0] is None and seen[1] == plan.greeting_text
+    assert VapiDialer("k", "pn").place_call(plan) == "call-1" and seen[0] is None and seen[1] == plan.greeting_text   # blind refused -> legacy
 
 
 def test_vapi_voice_from_dashboard():
@@ -680,3 +680,13 @@ def test_call_now_outside_hours_and_delete_lead():
     s.x("UPDATE leads SET status='CALLING'")
     assert "progress" in e.delete_lead(s.one("SELECT id FROM leads")["id"], SUN, "juvel")
     assert "progress" in e.call_now(s.one("SELECT id FROM leads")["id"], SUN, "juvel")
+
+
+def test_vapi_forwarding_failure_is_not_a_transfer():
+    e, s, d, n = mk()
+    client = TestClient(create_app(e, clock=lambda: MON_10AM))
+    e.ingest([lead()], MON_10AM); e.tick(MON_10AM)
+    ref = d.calls[0].call_ref
+    r = client.post("/webhooks/vapi", headers={"x-vapi-secret": "vapi-test"}, json={"message": {
+        "type": "end-of-call-report", "endedReason": "call.forwarding.no-answer", "call": {"id": "x", "metadata": {"call_ref": ref}}}})
+    assert r.json()["mapped"] == "TRANSFER_FAILED"

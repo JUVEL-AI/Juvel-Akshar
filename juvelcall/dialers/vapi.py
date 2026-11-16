@@ -14,12 +14,12 @@ class VapiDialer(Dialer):
     URL = "https://api.vapi.ai/call"
 
     def __init__(self, api_key: str, phone_number_id: str, server_secret: str = "",
-                 timeout_seconds: int = 15, transfer_style: str = "assistant",
+                 timeout_seconds: int = 15, transfer_style: str = "blind",
                  immediate_transfer: bool = True, sip_verb: str = "dial",
                  voice_id: str = "", voice_provider: str = "11labs", voice_model: str = "eleven_turbo_v2_5", **_):
         self.api_key, self.phone_number_id = api_key, phone_number_id
         self.server_secret, self.timeout = server_secret, timeout_seconds
-        self.transfer_style = transfer_style or "assistant"      # assistant | legacy
+        self.transfer_style = transfer_style or "blind"      # blind (proven on the Vobiz trunk) | assistant (adds a whisper) | legacy
         self.immediate = bool(immediate_transfer)
         self.sip_verb = sip_verb or "dial"
         self.voice_id, self.voice_provider, self.voice_model = voice_id, voice_provider or "11labs", voice_model
@@ -30,6 +30,12 @@ class VapiDialer(Dialer):
             d = {"type": "number", "number": n, "description": f"{p.counselor_name}, admissions counselor"}
             if style == "legacy":
                 d["transferPlan"] = {"mode": "warm-transfer-say-message", "message": p.whisper_text}
+            elif style == "blind":
+                # The setup tested live in Vapi: Vapi itself dials the counselor, no whisper.
+                d["message"] = "Connecting you now."
+                d["numberE164CheckEnabled"] = True
+                d["transferPlan"] = {"mode": "blind-transfer", "sipVerb": self.sip_verb,
+                                     "fallbackPlan": {"message": p.fallback_text, "endCallEnabled": True}}
             else:
                 # transferPlan lives inside each destination (same shape as a saved Vapi tool)
                 d["message"] = p.greeting_text if self.immediate else "Connecting you now."
@@ -55,7 +61,9 @@ class VapiDialer(Dialer):
                   "destination immediately, before saying anything. If that transfer fails, try the next destination. "
                   "If all fail, say exactly: " + p.fallback_text + " then end the call. Never answer questions or chat.")
         tool = {"type": "transferCall", "destinations": dests}
-        if style != "legacy":
+        if style == "blind":
+            tool["messages"] = [{"type": "request-start", "content": p.greeting_text, "blocking": True}]
+        elif style != "legacy":
             tool["messages"] = [{"type": "request-start", "blocking": True}]
         assistant = {
             "maxDurationSeconds": p.max_call_seconds,
@@ -81,17 +89,18 @@ class VapiDialer(Dialer):
         return requests.post(self.URL, json=payload, headers={"Authorization": f"Bearer {self.api_key}"}, timeout=self.timeout)
 
     def place_call(self, plan: CallPlan) -> str:
+        chain = {"blind": ["blind", "legacy"], "assistant": ["assistant", "blind", "legacy"], "legacy": ["legacy"]}.get(self.transfer_style, ["blind", "legacy"])
+        first = ""
         try:
-            r = self._post(self.build_payload(plan))
-            if r.status_code == 400 and self.transfer_style != "legacy":
-                # Vapi did not accept the newer transfer settings: place the call the older way so the parent is still called.
-                first = r.text[:200]
-                r = self._post(self.build_payload(plan, "legacy"))
+            for i, style in enumerate(chain):
+                r = self._post(self.build_payload(plan, style))
+                if r.status_code == 400 and i < len(chain) - 1:
+                    first = first or r.text[:200]       # Vapi did not accept these settings: try the next safer way so the parent is still called
+                    continue
                 if r.status_code >= 400:
-                    raise DialerError(f"vapi {r.status_code}: {r.text[:300]} (first try: {first})")
-            elif r.status_code >= 400:
-                raise DialerError(f"vapi {r.status_code}: {r.text[:300]}")
-            return str(r.json().get("id", ""))
+                    raise DialerError(f"vapi {r.status_code}: {r.text[:300]}" + (f" (first try: {first})" if first else ""))
+                return str(r.json().get("id", ""))
+            raise DialerError("vapi: no usable call settings")
         except DialerError:
             raise
         except Exception as e:

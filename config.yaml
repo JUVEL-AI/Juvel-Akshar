@@ -80,7 +80,7 @@ dialer:
     api_key: ${VAPI_API_KEY}
     phone_number_id: ${VAPI_PHONE_NUMBER_ID}   # Vapi's id for the number that dials out
     server_secret: ${VAPI_SERVER_SECRET}     # must match the secret sent to /webhooks/vapi
-    transfer_style: assistant                # assistant = whisper by a transfer assistant (works on a Vobiz SIP trunk) | legacy = old mode (Twilio only)
+    transfer_style: blind                    # blind = tested live on the Vobiz trunk (no whisper) | assistant = adds the whisper (untested) | legacy = old mode (Twilio only)
     immediate_transfer: true                 # true = transfer starts at once; false = greeting first, then the model waits for the parent to speak
     voice_id: ${VAPI_VOICE_ID}               # ElevenLabs voice ID (set on the dashboard Connections page). Empty = Vapi's default voice
     voice_provider: 11labs

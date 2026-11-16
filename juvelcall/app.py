@@ -136,6 +136,8 @@ def create_app(engine: Engine, clock=now_utc, run_loop: bool = False, loop_secon
         ref = (msg.get("call", {}).get("metadata") or {}).get("call_ref", "")
         reason = msg.get("endedReason", "")
         kind = VAPI_END.get(reason)
+        if reason.startswith(("call.forwarding", "call.in-progress.error-transfer")):
+            kind = EventKind.TRANSFER_FAILED            # the counselor was not reached: call the parent back later
         if kind is None:
             # parent answered but we never saw a forward = treat as needs-callback; hard errors = FAILED
             answered = not reason.startswith(("twilio-failed", "pipeline-error", "call.start.error", "phone-call-provider"))
