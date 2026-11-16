@@ -24,46 +24,45 @@ class VapiDialer(Dialer):
         self.sip_verb = sip_verb or "dial"
         self.voice_id, self.voice_provider, self.voice_model = voice_id, voice_provider or "11labs", voice_model
 
-    def _destinations(self, p: CallPlan) -> list:
+    def _destinations(self, p: CallPlan, style: str) -> list:
         out = []
         for n in p.counselor_numbers:
             d = {"type": "number", "number": n, "description": f"{p.counselor_name}, admissions counselor"}
-            if self.transfer_style == "legacy":
+            if style == "legacy":
                 d["transferPlan"] = {"mode": "warm-transfer-say-message", "message": p.whisper_text}
             else:
-                d["sipVerb"] = self.sip_verb          # 'dial': Vapi places the call to the counselor itself (no SIP REFER needed from the carrier)
+                # transferPlan lives inside each destination (same shape as a saved Vapi tool)
+                d["message"] = p.greeting_text if self.immediate else "Connecting you now."
+                d["transferPlan"] = {
+                    "mode": "warm-transfer-experimental", "sipVerb": self.sip_verb,
+                    "transferAssistant": {
+                        "firstMessage": p.whisper_text, "firstMessageMode": "assistant-speaks-first",
+                        "maxDurationSeconds": 60, "silenceTimeoutSeconds": 15,
+                        "model": {"provider": "openai", "model": "gpt-4o-mini", "temperature": 0,
+                                  "messages": [{"role": "system", "content":
+                                      "You speak to the school counselor who just answered. You have already said the "
+                                      "announcement. Do not say anything else. Then connect the call."}]},
+                    },
+                    "fallbackPlan": {"message": p.fallback_text, "endCallEnabled": True},
+                }
             out.append(d)
         return out
 
-    def build_payload(self, p: CallPlan) -> dict:
-        dests = self._destinations(p)
+    def build_payload(self, p: CallPlan, style: str | None = None) -> dict:
+        style = style or self.transfer_style
+        dests = self._destinations(p, style)
         system = ("You are a connector, not a conversational agent. Your only job is to call transferCall to the FIRST "
                   "destination immediately, before saying anything. If that transfer fails, try the next destination. "
                   "If all fail, say exactly: " + p.fallback_text + " then end the call. Never answer questions or chat.")
         tool = {"type": "transferCall", "destinations": dests}
-        if self.transfer_style != "legacy":
-            # Assistant-based warm transfer is the mode Vapi supports on BYO SIP trunks: a small assistant speaks the
-            # whisper to the counselor, then the parent is connected. The greeting is the message spoken to the parent
-            # right before the transfer starts.
-            tool["messages"] = [{"type": "request-start", "content": p.greeting_text}]
-            tool["transferPlan"] = {
-                "mode": "warm-transfer-experimental",
-                "transferAssistant": {
-                    "firstMessage": p.whisper_text, "firstMessageMode": "assistant-speaks-first",
-                    "maxDurationSeconds": 60, "silenceTimeoutSeconds": 15,
-                    "model": {"provider": "openai", "model": "gpt-4o-mini", "temperature": 0,
-                              "messages": [{"role": "system", "content":
-                                  "You speak to the school counselor who just answered. You have already said the "
-                                  "announcement. Do not say anything else. Then connect the call."}]},
-                },
-                "fallbackPlan": {"message": p.fallback_text, "endCallEnabled": True},
-            }
+        if style != "legacy":
+            tool["messages"] = [{"type": "request-start", "blocking": True}]
         assistant = {
             "maxDurationSeconds": p.max_call_seconds,
             "model": {"provider": "openai", "model": "gpt-4o-mini", "temperature": 0,
                       "messages": [{"role": "system", "content": system}], "tools": [tool]},
         }
-        if self.immediate and self.transfer_style != "legacy":
+        if self.immediate and style != "legacy":
             assistant["firstMessageMode"] = "assistant-speaks-first-with-model-generated-message"
         else:
             assistant["firstMessage"] = p.greeting_text
@@ -78,11 +77,19 @@ class VapiDialer(Dialer):
         return {"phoneNumberId": self.phone_number_id, "customer": {"number": p.parent_number},
                 "metadata": {"call_ref": p.call_ref, "lead_id": p.lead_id}, "assistant": assistant}
 
+    def _post(self, payload: dict):
+        return requests.post(self.URL, json=payload, headers={"Authorization": f"Bearer {self.api_key}"}, timeout=self.timeout)
+
     def place_call(self, plan: CallPlan) -> str:
         try:
-            r = requests.post(self.URL, json=self.build_payload(plan),
-                              headers={"Authorization": f"Bearer {self.api_key}"}, timeout=self.timeout)
-            if r.status_code >= 400:
+            r = self._post(self.build_payload(plan))
+            if r.status_code == 400 and self.transfer_style != "legacy":
+                # Vapi did not accept the newer transfer settings: place the call the older way so the parent is still called.
+                first = r.text[:200]
+                r = self._post(self.build_payload(plan, "legacy"))
+                if r.status_code >= 400:
+                    raise DialerError(f"vapi {r.status_code}: {r.text[:300]} (first try: {first})")
+            elif r.status_code >= 400:
                 raise DialerError(f"vapi {r.status_code}: {r.text[:300]}")
             return str(r.json().get("id", ""))
         except DialerError:
