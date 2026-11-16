@@ -253,6 +253,22 @@ def create_app(engine: Engine, clock=now_utc, run_loop: bool = False, loop_secon
             raise HTTPException(404, "no such lead")
         return {"ok": True}
 
+    @app.post("/api/lead/{lead_id}/call-now")
+    def api_call_now(lead_id: int, payload: dict | None = None, x_webhook_secret: str | None = Header(default=None)):
+        auth(x_webhook_secret)
+        why = engine.call_now(lead_id, clock(), str((payload or {}).get("by", ""))[:40])
+        if why:
+            raise HTTPException(409, why)
+        return {"ok": True}
+
+    @app.delete("/api/lead/{lead_id}")
+    def api_delete_lead(lead_id: int, by: str = "", x_webhook_secret: str | None = Header(default=None)):
+        auth(x_webhook_secret)
+        why = engine.delete_lead(lead_id, clock(), by[:40])
+        if why:
+            raise HTTPException(409, why)
+        return {"ok": True}
+
     @app.post("/admin/poll-sheet")
     def admin_poll(x_webhook_secret: str | None = Header(default=None)):
         auth(x_webhook_secret)

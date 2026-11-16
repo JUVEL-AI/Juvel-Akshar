@@ -162,11 +162,12 @@ class Engine:
             (Status.QUEUED.value, Status.RETRY.value, iso(now), limit))
         for r in rows:
             made = parse(r["created_at"])
-            if made and now - made > timedelta(hours=self.c["stale_after_hours"]):
+            if made and now - made > timedelta(hours=self.c["stale_after_hours"]) and self.store.kv_get(f"force_{r['id']}") is None:
                 self.store.update_lead(r["id"], now, status=Status.STALE.value, next_attempt_at=None,
                                        note="waited too long (calling was paused or the system was down)")
                 continue
-            if not in_hours(now, self.c, self.cfg.tz):
+            forced = self.store.kv_get(f"force_{r['id']}") is not None
+            if not forced and not in_hours(now, self.c, self.cfg.tz):
                 self.store.update_lead(r["id"], now, next_attempt_at=iso(next_open(now, self.c, self.cfg.tz)))
                 continue
             if not self._on_duty(r["campus"]):
@@ -316,6 +317,40 @@ class Engine:
         ok = self.notifier.send(to or self.cfg.notifications.get("admin_emails", []), subject, body)
         if ok:
             self.store.x("UPDATE alerts SET sent=1 WHERE id=?", (aid,))
+
+    def call_now(self, lead_id: int, now: datetime, who: str = "") -> str:
+        """Admin: try this lead again right now, even outside calling hours. Returns '' on success or a reason it was refused."""
+        r = self.store.one("SELECT * FROM leads WHERE id=?", (lead_id,))
+        if not r:
+            return "No such enquiry"
+        if r["status"] == Status.CALLING.value:
+            return "A call to this parent is in progress"
+        if not r["phone"] or not r["campus"]:
+            return "This enquiry has no valid phone number or campus"
+        if self.store.is_dnc(r["phone"]):
+            return "This number is on the do-not-call list"
+        if self.control_state() != "running":
+            return "Calling is paused or stopped. Press Start first"
+        self.store.update_lead(lead_id, now, status=Status.QUEUED.value, attempts=0, next_attempt_at=iso(now),
+                               note=f"call started by {who or 'an admin'}")
+        self.store.kv_set(f"force_{lead_id}", iso(now))
+        self.store.add_audit(now, who, "call_now", f"lead {lead_id}")
+        self.tick(now)
+        self.store.x("DELETE FROM kv WHERE k=?", (f"force_{lead_id}",))
+        return ""
+
+    def delete_lead(self, lead_id: int, now: datetime, who: str = "") -> str:
+        """Admin: remove an enquiry and its call records, so the same number can be tried again. Returns '' or a reason."""
+        r = self.store.one("SELECT status FROM leads WHERE id=?", (lead_id,))
+        if not r:
+            return "No such enquiry"
+        if r["status"] == Status.CALLING.value:
+            return "A call to this parent is in progress"
+        self.store.x("DELETE FROM calls WHERE lead_id=?", (lead_id,))
+        self.store.x("DELETE FROM alerts WHERE lead_id=?", (lead_id,))
+        self.store.x("DELETE FROM leads WHERE id=?", (lead_id,))
+        self.store.add_audit(now, who, "delete_lead", f"lead {lead_id}")
+        return ""
 
     def resolve(self, lead_id: int, now: datetime, note: str = "", who: str = "") -> bool:
         """A person has dealt with this lead (called the parent back, etc.)."""

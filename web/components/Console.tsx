@@ -110,6 +110,20 @@ export default function Console({ data, demo, error, pinRequired = false, role =
     await fetch(`/api/resolve/${id}`, { method: "POST" });
     router.refresh();
   };
+  const [leadMsg, setLeadMsg] = useState("");
+  const leadAction = async (id: number, kind: "call" | "delete") => {
+    if (demo) return;
+    const ok = kind === "call"
+      ? window.confirm("Call this parent now, even if it is outside calling hours? Use this only for your own test numbers or when the school says so.")
+      : window.confirm("Delete this enquiry and its call records? The same phone number can then be added again. This cannot be undone.");
+    if (!ok) return;
+    setLeadMsg("");
+    const r = await fetch(`/api/lead/${id}/${kind === "call" ? "call" : "delete"}`, { method: "POST" });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { setLeadMsg(j.error || "Could not do that"); return; }
+    if (kind === "delete") setPicked(null);
+    router.refresh();
+  };
   const sendControl = async () => {
     if (!ask) return;
     if (demo) { setAsk(null); return; }
@@ -285,7 +299,13 @@ export default function Console({ data, demo, error, pinRequired = false, role =
               <div>
                 <div><div className="eyebrow">Selected enquiry</div>
                   <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4 }}>{sel.parent || "—"}</div>
-                  <div className="mono sub" style={{ marginTop: 2 }}>{sel.phone} · {label(sel.campus)}</div></div>
+                  <div className="mono sub" style={{ marginTop: 2 }}>{sel.phone} · {label(sel.campus)}</div>
+                  {admin && !demo && (
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+                      <button type="button" className="fchip" onClick={() => leadAction(sel.id, "call")}>📞 Call now</button>
+                      <button type="button" className="fchip" onClick={() => leadAction(sel.id, "delete")}>🗑 Delete record</button>
+                    </div>)}
+                  {leadMsg && <div className="chip bad" role="alert" style={{ marginTop: 8 }}>{leadMsg}</div>}</div>
                 <div>
                   {timeline(sel, label(sel.campus)).map((e, i) => (
                     <div className="tl" key={i}>

@@ -638,3 +638,27 @@ def test_vapi_voice_from_dashboard():
     pl = VapiDialer("k", "pn", voice_id="abcDEF123voice").build_payload(plan)["assistant"]
     assert pl["voice"]["provider"] == "11labs" and pl["voice"]["voiceId"] == "abcDEF123voice"
     assert "voice" not in VapiDialer("k", "pn").build_payload(plan)["assistant"]
+
+
+def test_call_now_outside_hours_and_delete_lead():
+    SUN = datetime(2026, 11, 15, 11, 0, tzinfo=ZoneInfo("Asia/Kolkata"))          # a Sunday: closed
+    e, s, d, n = mk()
+    e.ingest([lead(at=SUN)], SUN)
+    assert e.tick(SUN) == [] and not d.calls                                     # normal rules: no call
+    lid = s.one("SELECT id FROM leads")["id"]
+    assert e.call_now(lid, SUN, "juvel") == ""
+    assert len(d.calls) == 1 and s.one("SELECT action FROM audit ORDER BY id DESC")["action"] == "call_now"
+    assert s.one("SELECT COUNT(*) c FROM kv WHERE k LIKE 'force_%'")["c"] == 0
+    s.x("UPDATE leads SET status='NO_RESPONSE' WHERE id=?", (lid,))
+    e.set_control("pause", SUN, "juvel")
+    assert "Start" in e.call_now(lid, SUN, "juvel")
+    # delete lets the same phone be entered again
+    e.set_control("start", SUN, "juvel")
+    s.x("UPDATE leads SET status='NO_RESPONSE' WHERE id=?", (lid,))
+    assert e.delete_lead(lid, SUN, "juvel") == ""
+    assert s.one("SELECT COUNT(*) c FROM leads")["c"] == 0 and s.one("SELECT COUNT(*) c FROM calls")["c"] == 0
+    e.ingest([lead(at=SUN)], SUN)
+    assert s.one("SELECT COUNT(*) c FROM leads")["c"] == 1
+    s.x("UPDATE leads SET status='CALLING'")
+    assert "progress" in e.delete_lead(s.one("SELECT id FROM leads")["id"], SUN, "juvel")
+    assert "progress" in e.call_now(s.one("SELECT id FROM leads")["id"], SUN, "juvel")
