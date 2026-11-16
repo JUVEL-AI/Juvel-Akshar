@@ -151,6 +151,7 @@ export default function Console({ data, demo, error, pinRequired = false, role =
           {error && <span className="chip bad">Backend not reachable</span>}
           <span className="chip"><span className="dot" />{data.hours_label ?? "Mon–Fri 8:30–2:30 · Sat 9:00–2:00"}</span>
           {admin && <Link href="/settings" className="chip" style={{ textDecoration: "none", color: "inherit" }}>⚙ Settings</Link>}
+          {admin && <Link href="/sources" className="chip" style={{ textDecoration: "none", color: "inherit" }}>📄 Lead sheets</Link>}
           {admin && <Link href="/integrations" className="chip" style={{ textDecoration: "none", color: "inherit" }}>🔌 Connections</Link>}
           {user && <span className="chip" title="Signed in as">{user}{admin ? " · admin" : ""}</span>}
           {user && <LogoutButton />}

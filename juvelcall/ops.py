@@ -25,7 +25,8 @@ def snapshot_base(engine) -> None:
     """Remember the config.yaml values so dashboard overrides can be layered on and removed."""
     cfg = engine.cfg
     engine._base = {"calling": copy.deepcopy(cfg.calling), "campuses": copy.deepcopy(cfg.campuses),
-                    "dialer": copy.deepcopy(cfg.dialer)}
+                    "dialer": copy.deepcopy(cfg.dialer),
+                    "sources": {"default_campus": cfg.sources.get("default_campus", ""), "date_order": cfg.sources.get("date_order", "mdy")}}
 
 
 def _stored(engine) -> dict:
@@ -75,6 +76,12 @@ def apply_overrides(engine) -> None:
         dialer["vapi"] = v
         if v.get("api_key") and v.get("phone_number_id"):
             dialer["type"] = "vapi"
+    try:
+        sm = json.loads(engine.store.kv_get("sheets") or "{}")
+    except ValueError:
+        sm = {}
+    cfg.sources["default_campus"] = sm["default_campus"] if "default_campus" in sm else base["sources"]["default_campus"]
+    cfg.sources["date_order"] = sm.get("date_order") or base["sources"]["date_order"]
     cfg.calling.clear(); cfg.calling.update(calling)
     cfg.campuses.clear(); cfg.campuses.update(campuses)
     changed = dialer != cfg.dialer
@@ -86,8 +93,8 @@ def apply_overrides(engine) -> None:
 
 
 # ---------------- integrations (Vapi / Vobiz), admin only ----------------
-SECRET_KEYS = ("vapi_api_key", "vapi_server_secret")
-INTEG_KEYS = ("vapi_api_key", "vapi_phone_number_id", "vapi_server_secret", "caller_id", "vapi_voice_id", "vapi_transfer_style")
+SECRET_KEYS = ("vapi_api_key", "vapi_server_secret", "google_service_account")
+INTEG_KEYS = ("vapi_api_key", "vapi_phone_number_id", "vapi_server_secret", "caller_id", "vapi_voice_id", "vapi_transfer_style", "google_service_account")
 
 
 def _integrations(engine) -> dict:
@@ -111,9 +118,13 @@ def integrations_view(engine) -> dict:
            "vapi_voice_id": v.get("voice_id", ""), "vapi_transfer_style": v.get("transfer_style", "blind")}
     out = {}
     for k in INTEG_KEYS:
-        val = eff[k] or ""
+        val = eff.get(k) or ""
         out[k] = {"set": bool(val), "value": _mask(val) if (k in SECRET_KEYS and val) else val,
                   "from": "dashboard" if st.get(k) else ("server settings" if val else "")}
+    from .sheets_admin import google_json, service_email
+    g = google_json(engine)
+    out["google_service_account"] = {"set": bool(g), "value": service_email(g) or ("•" * 8 if g else ""),
+                                     "from": "dashboard" if st.get("google_service_account") else ("server settings" if g else "")}
     out["live"] = bool(eff["vapi_api_key"] and eff["vapi_phone_number_id"] and cfg.dialer.get("type") == "vapi")
     return out
 
@@ -135,10 +146,13 @@ def save_integrations(engine, payload: dict, now: datetime, who: str) -> dict:
             if n in counselors:
                 raise ValueError("The calling number cannot be the same as a counselor's number")
             val = n
+        elif k == "google_service_account":
+            from .sheets_admin import validate_google_json
+            val = validate_google_json(val)
         elif k == "vapi_transfer_style":
             if val not in ("blind", "assistant"):
                 raise ValueError("Transfer style must be 'blind' or 'assistant'")
-        elif any(ch.isspace() for ch in val):
+        elif k != "google_service_account" and any(ch.isspace() for ch in val):
             raise ValueError(f"{k.replace('_', ' ')}: remove the spaces")
         if k.startswith("vapi_") and k not in ("vapi_voice_id", "vapi_transfer_style") and len(val) < 8:
             raise ValueError(f"{k.replace('_', ' ')} looks too short")

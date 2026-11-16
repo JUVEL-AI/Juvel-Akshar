@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, Header, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import console, ops
+from . import console, ops, sheets_admin
 
 from .config import Config
 from .dialers import dialer_from_config
@@ -37,25 +37,15 @@ def create_app(engine: Engine, clock=now_utc, run_loop: bool = False, loop_secon
     last_poll = {"t": 0.0}
 
     def poll_sheet() -> dict:
-        import os
-        from .sources.sheets import read_sheet
-        creds = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "")
-        if not (sheet_cfg.get("spreadsheet_id") and creds):
-            return {"skipped": "sheet not configured"}
-        leads = read_sheet(creds, sheet_cfg["spreadsheet_id"], sheet_cfg.get("worksheet", "Sheet1"),
-                           cfg.sources["csv_columns"], cfg.tz, "meta_sheet", cfg.sources.get("date_order", "mdy"))
-        first = not engine.store.kv_get("sheet_baselined")
-        res = engine.ingest(leads, clock(), baseline=first)
-        if first:
-            engine.store.kv_set("sheet_baselined", iso(clock()))
-            res["baseline"] = True
-        return res
+        from . import sheets_admin
+        ops.apply_overrides(engine)
+        return sheets_admin.poll_all(engine, clock())
 
     async def loop():
         import time
         while True:
             try:
-                if sheet_cfg.get("spreadsheet_id") and time.time() - last_poll["t"] >= sheet_cfg.get("poll_seconds", 60):
+                if sheets_admin.configured(engine) and time.time() - last_poll["t"] >= sheet_cfg.get("poll_seconds", 60):
                     last_poll["t"] = time.time()
                     await asyncio.to_thread(poll_sheet)
                 engine.tick(clock())
@@ -164,7 +154,7 @@ def create_app(engine: Engine, clock=now_utc, run_loop: bool = False, loop_secon
         auth(x_webhook_secret)
         out: dict = {}
         every = sheet_cfg.get("poll_seconds", 60)
-        if sheet_cfg.get("spreadsheet_id"):
+        if sheets_admin.configured(engine):
             last = engine.store.kv_get("sheet_polled_at")
             now_ts = clock().timestamp()
             if not last or now_ts - float(last) >= every - 5:
@@ -282,6 +272,30 @@ def create_app(engine: Engine, clock=now_utc, run_loop: bool = False, loop_secon
         if why:
             raise HTTPException(409, why)
         return {"ok": True}
+
+    @app.get("/api/sources")
+    def api_sources_get(x_webhook_secret: str | None = Header(default=None)):
+        auth(x_webhook_secret)
+        ops.apply_overrides(engine)
+        return sheets_admin.view(engine)
+
+    @app.put("/api/sources")
+    def api_sources_put(payload: dict, x_webhook_secret: str | None = Header(default=None)):
+        auth(x_webhook_secret)
+        who = str(payload.pop("by", "dashboard"))[:40]
+        try:
+            return sheets_admin.save(engine, payload, clock(), who)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+
+    @app.post("/api/sources/preview")
+    def api_sources_preview(payload: dict, x_webhook_secret: str | None = Header(default=None)):
+        auth(x_webhook_secret)
+        ops.apply_overrides(engine)
+        try:
+            return sheets_admin.preview(engine, str(payload.get("spreadsheet", "")), str(payload.get("worksheet", "")))
+        except ValueError as e:
+            raise HTTPException(422, str(e))
 
     @app.post("/admin/poll-sheet")
     def admin_poll(x_webhook_secret: str | None = Header(default=None)):

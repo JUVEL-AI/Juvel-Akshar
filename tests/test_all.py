@@ -130,7 +130,7 @@ def test_duplicate_phone_and_dedupe_window():
 
 def test_bad_inputs_flagged_not_called():
     e, s, d, n = mk()
-    e.cfg.sources["default_campus"] = ""
+    ops.snapshot_base(e); e._base["sources"]["default_campus"] = ""
     e.ingest([lead(key="a", phone="12345"), lead(key="b", phone="9811111111", campus="Somewhere")], MON_10AM)
     assert e.tick(MON_10AM) == []
     assert e.report() == {"INVALID_PHONE": 1, "NEEDS_REVIEW": 1}
@@ -555,13 +555,13 @@ def test_old_bad_rows_do_not_email_but_fresh_ones_do():
 
 def test_campus_column_with_grade_or_either_and_default_campus():
     e, s, d, n = mk()
-    e.cfg.sources["default_campus"] = ""
+    ops.snapshot_base(e); e._base["sources"]["default_campus"] = ""
     l1 = lead(); l1.campus = "grade-9"; l1.grade_text = ""
     e.ingest([l1], MON_10AM)
     r = s.one("SELECT status, grade FROM leads")
     assert r["status"] == "NEEDS_REVIEW" and r["grade"] == "9th grade"      # class level rescued, campus needs a person
     e2, s2, d2, n2 = mk()
-    e2.cfg.sources["default_campus"] = "t_nagar"
+    ops.snapshot_base(e2); e2._base["sources"]["default_campus"] = "t_nagar"
     l2 = lead(phone="9840922616"); l2.campus = "either"
     e2.ingest([l2], MON_10AM)
     assert s2.one("SELECT campus, status FROM leads")["campus"] == "t_nagar"
@@ -716,3 +716,41 @@ def test_records_visibility_setting():
     assert console.build(e, MON_10AM)["records_staff"] is False
     ops.save_settings(e, {"records_staff": True}, MON_10AM, "juvel")
     assert console.build(e, MON_10AM)["records_staff"] is True and ops.effective_settings(e)["records_staff"] is True
+
+
+def test_sheet_sources_from_dashboard(monkeypatch):
+    import json as _j
+    from juvelcall import sheets_admin as sa
+    heads = ["Timing", "ad_name", "campaign_name", "which_campus_are_you_enquiring_for?", "which_school_is_your_child_currently_studying_in?",
+             "which_grade_is_your_child_currently_studying_in?", "full_name", "phone_number", "city", "email", "Lead Quality ", "Status"]
+    g = sa.suggest_columns(heads)
+    assert g["phone"] == "phone_number" and g["name"] == "full_name" and g["campus"] == "which_campus_are_you_enquiring_for?"
+    assert g["grade"] == "which_grade_is_your_child_currently_studying_in?" and g["created_at"] == "Timing" and g["email"] == "email"
+    assert sa.parse_sheet_id("https://docs.google.com/spreadsheets/d/1hqnfahxY-agKd8NiJ4l3lpz8Q4W3DzRjUYQdhJO0iLY/edit?gid=0#gid=0").startswith("1hqnfahxY")
+    with pytest.raises(ValueError):
+        sa.parse_sheet_id("hello")
+
+    e, s, d, n = mk()
+    ops.snapshot_base(e)
+    key = _j.dumps({"type": "service_account", "client_email": "bot@proj.iam.gserviceaccount.com", "private_key": "x"})
+    v = ops.save_integrations(e, {"google_service_account": key}, MON_10AM, "juvel")
+    assert v["google_service_account"]["value"] == "bot@proj.iam.gserviceaccount.com" and "private_key" not in str(v)
+    with pytest.raises(ValueError):
+        ops.save_integrations(e, {"google_service_account": "nope"}, MON_10AM, "juvel")
+
+    cols = {"phone": "phone_number", "name": "full_name", "campus": "which_campus_are_you_enquiring_for?", "created_at": "Timing"}
+    link = "https://docs.google.com/spreadsheets/d/1hqnfahxY-agKd8NiJ4l3lpz8Q4W3DzRjUYQdhJO0iLY/edit"
+    with pytest.raises(ValueError):
+        sa.save(e, {"sheets": [{"spreadsheet": link, "worksheet": "Sheet1", "columns": {"phone": "phone_number"}}]}, MON_10AM, "juvel")
+    out = sa.save(e, {"sheets": [{"label": "Leads", "spreadsheet": link, "worksheet": "Sheet1", "columns": cols}], "default_campus": "ecr"}, MON_10AM, "juvel")
+    assert out["sheets"][0]["spreadsheet_id"].startswith("1hqnfahxY") and out["default_campus"] == "ecr"
+
+    rows = {"v": [{"Timing": "2026-11-16T10:00:00+05:30", "full_name": "Old Parent", "phone_number": "p:+919811111111",
+                   "which_campus_are_you_enquiring_for?": "ecr_campus"}]}
+    monkeypatch.setattr(sa, "read_rows", lambda creds, sid, ws: rows["v"])
+    r1 = sa.poll_all(e, MON_10AM)
+    assert r1["Leads"].get("baseline") is True and s.one("SELECT status FROM leads")["status"] == "STALE"        # already there: not called
+    rows["v"].append({"Timing": "2026-11-16T10:05:00+05:30", "full_name": "New Parent", "phone_number": "p:+919822222222",
+                      "which_campus_are_you_enquiring_for?": "either"})
+    r2 = sa.poll_all(e, MON_10AM)
+    assert s.one("SELECT status, campus FROM leads WHERE name='New Parent'")["campus"] == "ecr"                    # 'either' -> default campus
