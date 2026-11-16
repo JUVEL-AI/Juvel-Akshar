@@ -82,24 +82,36 @@ class Engine:
         return self.control_info() | {"parked": parked}
 
     # ---------- intake ----------
-    def ingest(self, leads: list[RawLead], now: datetime) -> dict:
+    def ingest(self, leads: list[RawLead], now: datetime, baseline: bool = False) -> dict:
+        """baseline=True is the very first read of the school's sheet: every row already there is stored as STALE,
+        so nobody who enquired before go-live is called or emailed about."""
         ops.apply_overrides(self)
         out = {"new": 0, "skipped_existing": 0}
         for lead in sorted(leads, key=lambda l: l.created_at):
             if self.store.one("SELECT 1 FROM leads WHERE source=? AND key=?", (lead.source, lead.key)):
                 out["skipped_existing"] += 1
                 continue
-            self._ingest_one(lead, now)
+            self._ingest_one(lead, now, baseline)
             out["new"] += 1
         return out
 
-    def _ingest_one(self, lead: RawLead, now: datetime) -> int:
+    def _ingest_one(self, lead: RawLead, now: datetime, baseline: bool = False) -> int:
         phone = clean_phone(lead.phone)
         campus = canonical_campus(lead.campus)
         grade = clean_grade(lead.grade_text)
+        if not campus:
+            # This school's Meta form sometimes puts a class level ('grade-9', 'elc-1') or 'either' in the campus column.
+            grade = grade or clean_grade(lead.campus)
+            raw = (lead.campus or "").strip().lower()
+            gradelike = bool(clean_grade(lead.campus))
+            open_answer = (not raw) or gradelike or any(w in raw for w in ("either", "any", "both", "no preference", "not sure", "none", "n/a"))
+            # only an open answer ('either', blank, a class level) takes the default; an unreadable campus still needs a person
+            campus = (self.cfg.sources.get("default_campus") or None) if open_answer else None
         status, note, next_at = Status.QUEUED, "", None
 
-        if not phone:
+        if baseline:
+            status, note = Status.STALE, "already in the sheet before go-live"
+        elif not phone:
             status, note = Status.INVALID_PHONE, f"could not read phone '{lead.phone}'"
         elif self.store.is_dnc(phone):
             status, note = Status.DO_NOT_CALL, "on do-not-call list"
@@ -122,7 +134,9 @@ class Engine:
              clean_name(lead.student_name), phone, lead.phone, campus, lead.campus, grade, lead.grade_text,
              lead.email, lead.city, status.value, iso(next_at) if next_at else None, note,
              self.store.dump_raw(lead.raw), iso(now)))
-        if status in (Status.INVALID_PHONE, Status.NEEDS_REVIEW) and "while calling was stopped" not in note:   # old leads (e.g. first sheet import) stay silent
+        fresh = now - lead.created_at <= timedelta(hours=self.c["stale_after_hours"])
+        if (status in (Status.INVALID_PHONE, Status.NEEDS_REVIEW) and fresh
+                and "while calling was stopped" not in note):                  # old rows (first sheet import) stay silent
             self._alert(now, "lead_needs_attention", lead_id,
                         f"Admissions lead needs attention ({status.value})",
                         f"Lead #{lead_id}: {clean_name(lead.name)} / {lead.phone} / {lead.campus}\n{note}\n"
@@ -174,6 +188,8 @@ class Engine:
             whisper = m["whisper_full"].format(**ctx)
         elif r["student_name"]:
             whisper = m["whisper_no_class"].format(**ctx)
+        elif r["grade"]:
+            whisper = m.get("whisper_class_only", m["whisper_minimal"]).format(**ctx)
         else:
             whisper = m["whisper_minimal"].format(**ctx)
         return CallPlan(
@@ -187,6 +203,15 @@ class Engine:
 
     def _place(self, r, now: datetime) -> str | None:
         plan = self.build_plan(r)
+        # Loop guard: never transfer to the very number we call from.
+        own = clean_phone(plan.caller_id) if plan.caller_id else None
+        if own and any(clean_phone(n) == own for n in plan.counselor_numbers):
+            if not self.store.kv_get("loop_alerted_" + now.astimezone(self.cfg.tz).strftime("%Y%m%d")):
+                self.store.kv_set("loop_alerted_" + now.astimezone(self.cfg.tz).strftime("%Y%m%d"), "1")
+                self._alert(now, "loop_guard", None, "Calling stopped: counselor number equals the calling number",
+                            "A counselor or backup number is the same as the number calls are made from, so the transfer "
+                            "would loop. No calls are placed for that campus until it is fixed in Settings.")
+            return None
         attempt = r["attempts"] + 1
         # Atomic claim: only one worker can move a lead to CALLING (serverless ticks can overlap).
         claimed = self.store.x(

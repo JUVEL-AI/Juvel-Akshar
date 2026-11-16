@@ -130,6 +130,7 @@ def test_duplicate_phone_and_dedupe_window():
 
 def test_bad_inputs_flagged_not_called():
     e, s, d, n = mk()
+    e.cfg.sources["default_campus"] = ""
     e.ingest([lead(key="a", phone="12345"), lead(key="b", phone="9811111111", campus="Somewhere")], MON_10AM)
     assert e.tick(MON_10AM) == []
     assert e.report() == {"INVALID_PHONE": 1, "NEEDS_REVIEW": 1}
@@ -499,3 +500,87 @@ def test_new_api_endpoints_need_secret():
     assert r.status_code == 422
     r = c.put("/api/settings", json={"max_attempts": 3, "by": "x"}, headers=h)
     assert r.json()["max_attempts"] == 3
+
+
+def test_loop_guard_blocks_transfer_to_calling_number_and_settings_reject_it():
+    e, s, d, n = mk()
+    own = e.cfg.campuses["ecr"]["caller_id"] = "+917550033275"          # same as the ECR counselor
+    e._base["campuses"]["ecr"]["caller_id"] = own
+    e.ingest([lead()], MON_10AM)
+    assert e.tick(MON_10AM) == [] and not d.calls
+    assert any("would loop" in x[2] or "equals the calling number" in x[1] for x in n.sent)
+    with pytest.raises(ValueError):
+        ops.save_settings(e, {"campuses": {"ecr": {"counselors": [{"name": "X", "number": "7550033275"}]}}}, MON_10AM, "t")
+
+
+# ---- the school's real sheet shapes
+def test_parse_time_handles_meta_iso_and_sheet_slash_dates():
+    from juvelcall.sources.csv_source import parse_time
+    t = parse_time("2026-09-25T06:53:57+05:30", IST)
+    assert t.hour == 6 and t.utcoffset().total_seconds() == 19800
+    assert parse_time("2026-09-25T11:00:00-07:00", IST).utcoffset().total_seconds() == -25200
+    m = parse_time("10/29/2026 11:34:20", IST)                      # month first, as in this sheet
+    assert (m.month, m.day, m.hour) == (10, 29, 11)
+    assert parse_time("29/10/2026 11:34:20", IST).month == 10        # first number above 12 can only be a day
+    assert parse_time("03/04/2026 09:00:00", IST, "dmy").month == 4
+    with pytest.raises(ValueError):
+        parse_time("Shk Abdeali Al-Yamani", IST)
+
+
+def test_sheet_rows_unreadable_time_become_stale_and_junk_rows_are_skipped():
+    from juvelcall.sources.csv_source import lead_from_row
+    cols = cfg.sources["csv_columns"]
+    bad = lead_from_row({"Timing": "garbage", "full_name": "A", "phone_number": "p:+919840922615"}, cols, IST, "meta_sheet", "row 9")
+    assert bad.created_at.year == 2000 and "_time_unreadable" in bad.raw
+    with pytest.raises(ValueError):
+        lead_from_row({"Timing": "", "full_name": "", "phone_number": ""}, cols, IST, "meta_sheet", "row 10")
+
+
+def test_first_sheet_read_is_baseline_nobody_called_or_emailed():
+    e, s, d, n = mk()
+    fresh = lead(phone="9840922615")                                  # even a lead from minutes ago
+    e.ingest([fresh], MON_10AM, baseline=True)
+    assert s.one("SELECT status FROM leads")["status"] == "STALE"
+    assert e.tick(MON_10AM) == [] and not d.calls and not n.sent
+
+
+def test_old_bad_rows_do_not_email_but_fresh_ones_do():
+    e, s, d, n = mk()
+    old = lead(phone="notaphone"); old.created_at = MON_10AM - timedelta(days=30)
+    e.ingest([old], MON_10AM)
+    assert not n.sent
+    e.ingest([lead(key="2", phone="notaphone")], MON_10AM)
+    assert any("needs attention" in x[1] for x in n.sent)
+
+
+def test_campus_column_with_grade_or_either_and_default_campus():
+    e, s, d, n = mk()
+    e.cfg.sources["default_campus"] = ""
+    l1 = lead(); l1.campus = "grade-9"; l1.grade_text = ""
+    e.ingest([l1], MON_10AM)
+    r = s.one("SELECT status, grade FROM leads")
+    assert r["status"] == "NEEDS_REVIEW" and r["grade"] == "9th grade"      # class level rescued, campus needs a person
+    e2, s2, d2, n2 = mk()
+    e2.cfg.sources["default_campus"] = "t_nagar"
+    l2 = lead(phone="9840922616"); l2.campus = "either"
+    e2.ingest([l2], MON_10AM)
+    assert s2.one("SELECT campus, status FROM leads")["campus"] == "t_nagar"
+
+
+def test_whisper_without_student_but_with_class():
+    e, s, d, n = mk()
+    l = lead(); l.student_name = ""; l.grade_text = "grade 5"
+    e.ingest([l], MON_10AM); e.tick(MON_10AM)
+    assert "class 5th grade" in d.calls[-1].whisper_text and "student" not in d.calls[-1].whisper_text
+
+
+def test_default_campus_ecr_only_for_open_answers():
+    e, s, d, n = mk()
+    assert e.cfg.sources["default_campus"] == "ecr"
+    a = lead(key="a", phone="9811111111"); a.campus = "either"
+    b = lead(key="b", phone="9822222222"); b.campus = ""
+    c = lead(key="c", phone="9833333333"); c.campus = "Somewhere"
+    e.ingest([a, b, c], MON_10AM)
+    rows = {r["external_key"] if "external_key" in r.keys() else r["phone"]: r for r in s.q("SELECT * FROM leads")}
+    camp = [(r["campus"], r["status"]) for r in rows.values()]
+    assert camp.count(("ecr", "QUEUED")) == 2 and any(st == "NEEDS_REVIEW" for _, st in camp)

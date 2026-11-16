@@ -49,6 +49,7 @@ messages:
   greeting: "Hello, calling from {school_name} regarding your registration. {counselor_name} from the admissions team will speak with you now. Please stay on the line."
   whisper_full: "Admissions inquiry. Parent {parent_name}, student {student_name}, class {grade}, {campus_label} campus. Connecting now."
   whisper_no_class: "Admissions inquiry. Parent {parent_name}, student {student_name}, {campus_label} campus. Connecting now."
+  whisper_class_only: "Admissions inquiry. Parent {parent_name}, class {grade}, {campus_label} campus. Connecting now."
   whisper_minimal: "Admissions inquiry. Parent {parent_name}, {campus_label} campus. Connecting now."
   fallback: "Thank you for staying on the call. Our admissions counselor will call you back shortly. We look forward to speaking with you soon."   # CONFIRM final wording with the school
 
@@ -92,12 +93,14 @@ sources:
     spreadsheet_id: ${SHEET_ID}
     worksheet: "Sheet1"
     poll_seconds: 60
-  csv_columns:                             # map your sheet's column titles (CONFIRM)
-    created_at: "created_time"
+  date_order: mdy                          # how this sheet writes 10/29/2026 (month first). A day above 12 is always read as a day.
+  default_campus: "ecr"                       # campus for leads who answered "either" or left it blank. Empty = a person checks them (NEEDS_REVIEW). ASK THE SCHOOL
+  csv_columns:                             # the school's Meta lead sheet column titles (confirmed from their export)
+    created_at: "Timing"
     name: "full_name"
-    student_name: "student_name"
+    student_name: ""                       # the Meta form has no child-name question
     phone: "phone_number"
-    campus: "campus"
-    grade: "grade"
+    campus: "which_campus_are_you_enquiring_for?"
+    grade: "which_grade_is_your_child_currently_studying_in?"
     email: "email"
     city: "city"
