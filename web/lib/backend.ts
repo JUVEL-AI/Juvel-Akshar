@@ -31,3 +31,15 @@ export async function loadSettings(): Promise<{ settings: SettingsData | null; a
     return { settings: await a.json(), audit: b.ok ? await b.json() : [] };
   } catch (e) { return { settings: null, audit: [], error: String(e) }; }
 }
+
+export type IntegField = { set: boolean; value: string; from: string };
+export type IntegData = { vapi_api_key: IntegField; vapi_phone_number_id: IntegField; vapi_server_secret: IntegField; caller_id: IntegField; live: boolean };
+
+export async function loadIntegrations(): Promise<{ data: IntegData | null; error?: string }> {
+  if (!base()) return { data: null };
+  try {
+    const r = await fetch(`${base()}/api/integrations`, { headers: secretHeaders(), cache: "no-store" });
+    if (!r.ok) throw new Error(`backend answered ${r.status}`);
+    return { data: await r.json() };
+  } catch (e) { return { data: null, error: String(e) }; }
+}

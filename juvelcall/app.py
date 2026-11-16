@@ -14,7 +14,7 @@ from .engine import Engine
 from .models import CallEvent, EventKind, RawLead
 from .notify import notifier_from_config
 from .sources.csv_source import parse_time
-from .store import Store
+from .store import iso, Store
 
 
 def now_utc() -> datetime:
@@ -43,8 +43,13 @@ def create_app(engine: Engine, clock=now_utc, run_loop: bool = False, loop_secon
         if not (sheet_cfg.get("spreadsheet_id") and creds):
             return {"skipped": "sheet not configured"}
         leads = read_sheet(creds, sheet_cfg["spreadsheet_id"], sheet_cfg.get("worksheet", "Sheet1"),
-                           cfg.sources["csv_columns"], cfg.tz, "meta_sheet")
-        return engine.ingest(leads, clock())
+                           cfg.sources["csv_columns"], cfg.tz, "meta_sheet", cfg.sources.get("date_order", "mdy"))
+        first = not engine.store.kv_get("sheet_baselined")
+        res = engine.ingest(leads, clock(), baseline=first)
+        if first:
+            engine.store.kv_set("sheet_baselined", iso(clock()))
+            res["baseline"] = True
+        return res
 
     async def loop():
         import time
@@ -87,9 +92,13 @@ def create_app(engine: Engine, clock=now_utc, run_loop: bool = False, loop_secon
         cols = cfg.sources.get("csv_columns", {})
         g = lambda k: str(payload.get(cols.get(k, k), payload.get(k, "")) or "")
         created = g("created_at")
+        try:
+            when = parse_time(created, cfg.tz, cfg.sources.get("date_order", "mdy")) if created else clock()
+        except ValueError:
+            when = clock()                      # a live webhook lead is new by definition; never drop it over a bad timestamp
         rl = RawLead(
-            key=str(payload.get("id") or f"{created}|{g('phone')}"), source="webhook", row_ref="webhook",
-            created_at=parse_time(created, cfg.tz) if created else clock(),
+            key=str(payload.get("id") or f"{created}|{g('phone')}|{g('name')}"), source="webhook", row_ref="webhook",
+            created_at=when,
             name=g("name"), student_name=g("student_name"), phone=g("phone"), campus=g("campus"),
             grade_text=g("grade"), city=g("city"), email=g("email"), raw=payload)
         res = engine.ingest([rl], clock())
@@ -117,6 +126,7 @@ def create_app(engine: Engine, clock=now_utc, run_loop: bool = False, loop_secon
     @app.post("/webhooks/vapi")
     def vapi_hook(payload: dict, x_vapi_secret: str | None = Header(default=None)):
         """Vapi end-of-call report -> our call result. Only 'end-of-call-report' matters."""
+        ops.apply_overrides(engine)               # the secret may have been saved from the dashboard
         vsecret = cfg.dialer.get("vapi", {}).get("server_secret", "")
         if not vsecret or x_vapi_secret != vsecret:
             raise HTTPException(401, "bad secret")
@@ -189,6 +199,27 @@ def create_app(engine: Engine, clock=now_utc, run_loop: bool = False, loop_secon
             return ops.save_settings(engine, payload, clock(), who)
         except ValueError as e:
             raise HTTPException(422, str(e))
+
+    @app.get("/api/integrations")
+    def api_integrations_get(x_webhook_secret: str | None = Header(default=None)):
+        auth(x_webhook_secret)
+        ops.apply_overrides(engine)
+        return ops.integrations_view(engine)
+
+    @app.put("/api/integrations")
+    def api_integrations_put(payload: dict, x_webhook_secret: str | None = Header(default=None)):
+        auth(x_webhook_secret)
+        who = str(payload.pop("by", "dashboard"))[:40]
+        try:
+            return ops.save_integrations(engine, payload, clock(), who)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+
+    @app.post("/api/integrations/test")
+    def api_integrations_test(x_webhook_secret: str | None = Header(default=None)):
+        auth(x_webhook_secret)
+        ops.apply_overrides(engine)
+        return ops.test_vapi(engine)
 
     @app.get("/api/audit")
     def api_audit(limit: int = 40, x_webhook_secret: str | None = Header(default=None)):

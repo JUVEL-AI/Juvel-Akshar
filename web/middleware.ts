@@ -1,36 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
+import { COOKIE, authOn, readToken } from "@/lib/auth";
 
-/** Login gate (HTTP Basic) with named users and roles.
- *  CONSOLE_USERS = "priya:pw1:admin,viji:pw2:staff"  (admin can Start/Pause/Stop, change Settings, export; staff can view and mark done)
- *  If CONSOLE_USERS is empty but CONSOLE_PASSWORD is set, any user name + that password gets admin.
- *  If neither is set the dashboard is open (preview only). */
-type U = { name: string; pw: string; role: "admin" | "staff" };
-
-function users(): U[] {
-  return (process.env.CONSOLE_USERS ?? "").split(",").map((s) => s.trim()).filter(Boolean).map((s) => {
-    const [name, pw, role] = s.split(":");
-    return { name, pw, role: role === "admin" ? "admin" : "staff" } as U;
-  }).filter((u) => u.name && u.pw);
-}
-
-export function middleware(req: NextRequest) {
+/** Login gate. Everything except the login page needs a valid session cookie.
+ *  Users: CONSOLE_USERS="name:password:admin,name2:password2:staff". Open (preview) if no users are set. */
+export async function middleware(req: NextRequest) {
   const headers = new Headers(req.headers);
   headers.delete("x-juvel-user"); headers.delete("x-juvel-role");           // never trust these from the browser
-  const list = users(), shared = process.env.CONSOLE_PASSWORD;
-  if (!list.length && !shared) {
+  const path = req.nextUrl.pathname;
+  if (!authOn()) {
     headers.set("x-juvel-user", "dashboard"); headers.set("x-juvel-role", "admin");
     return NextResponse.next({ request: { headers } });
   }
-  const h = req.headers.get("authorization") ?? "";
-  if (h.startsWith("Basic ")) {
-    const decoded = atob(h.slice(6));
-    const i = decoded.indexOf(":");
-    const name = decoded.slice(0, i), pw = decoded.slice(i + 1);
-    const hit = list.find((u) => u.name.toLowerCase() === name.toLowerCase() && u.pw === pw);
-    if (hit) { headers.set("x-juvel-user", hit.name); headers.set("x-juvel-role", hit.role); return NextResponse.next({ request: { headers } }); }
-    if (!list.length && shared && pw === shared) { headers.set("x-juvel-user", name || "admin"); headers.set("x-juvel-role", "admin"); return NextResponse.next({ request: { headers } }); }
+  if (path === "/login" || path === "/api/login" || path === "/api/logout") return NextResponse.next({ request: { headers } });
+  const who = await readToken(req.cookies.get(COOKIE)?.value);
+  if (who) {
+    headers.set("x-juvel-user", who.user); headers.set("x-juvel-role", who.role);
+    return NextResponse.next({ request: { headers } });
   }
-  return new NextResponse("Password required", { status: 401, headers: { "WWW-Authenticate": 'Basic realm="Juvel Calling"' } });
+  if (path.startsWith("/api/")) return NextResponse.json({ ok: false, error: "Please sign in again" }, { status: 401 });
+  const to = req.nextUrl.clone(); to.pathname = "/login"; to.search = path === "/" ? "" : `?next=${encodeURIComponent(path)}`;
+  return NextResponse.redirect(to);
 }
 
 export const config = { matcher: "/((?!_next/static|_next/image|favicon.ico).*)" };

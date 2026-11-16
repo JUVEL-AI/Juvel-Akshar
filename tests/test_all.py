@@ -584,3 +584,27 @@ def test_default_campus_ecr_only_for_open_answers():
     rows = {r["external_key"] if "external_key" in r.keys() else r["phone"]: r for r in s.q("SELECT * FROM leads")}
     camp = [(r["campus"], r["status"]) for r in rows.values()]
     assert camp.count(("ecr", "QUEUED")) == 2 and any(st == "NEEDS_REVIEW" for _, st in camp)
+
+
+def test_integrations_saved_from_dashboard():
+    import pytest as _p
+    e, s, d, n = mk()
+    ops.snapshot_base(e)
+    v = ops.save_integrations(e, {"vapi_api_key": "sk_live_abcdef123456", "vapi_phone_number_id": "pn_123456789",
+                                  "vapi_server_secret": "srv-secret-9999", "caller_id": "+914440001111"}, MON_10AM, "juvel")
+    assert v["live"] and v["vapi_api_key"]["value"].endswith("3456") and "sk_live" not in v["vapi_api_key"]["value"]
+    assert v["caller_id"]["value"] == "+914440001111" and e.cfg.dialer["vapi"]["api_key"] == "sk_live_abcdef123456"
+    assert e.dialer.__class__.__name__ == "VapiDialer"
+    assert all(c["caller_id"] == "+914440001111" for c in e.cfg.campuses.values())
+    assert s.one("SELECT action,detail FROM audit ORDER BY id DESC")["action"] == "integrations"
+    assert "sk_live" not in s.one("SELECT detail FROM audit ORDER BY id DESC")["detail"]
+    # blank keeps, other fields change, the secret survives a later tick
+    ops.save_integrations(e, {"caller_id": "+914440002222"}, MON_10AM, "juvel")
+    e.tick(MON_10AM)
+    assert e.cfg.dialer["vapi"]["api_key"] == "sk_live_abcdef123456" and e.cfg.campuses["ecr"]["caller_id"] == "+914440002222"
+    with _p.raises(ValueError):
+        ops.save_integrations(e, {"caller_id": "7550033275"}, MON_10AM, "juvel")      # a counselor's own number
+    with _p.raises(ValueError):
+        ops.save_integrations(e, {"vapi_api_key": "short"}, MON_10AM, "juvel")
+    ops.save_integrations(e, {"clear": ["vapi_api_key"]}, MON_10AM, "juvel")
+    assert ops.integrations_view(e)["vapi_api_key"]["from"] != "dashboard"

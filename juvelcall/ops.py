@@ -24,7 +24,8 @@ HM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 def snapshot_base(engine) -> None:
     """Remember the config.yaml values so dashboard overrides can be layered on and removed."""
     cfg = engine.cfg
-    engine._base = {"calling": copy.deepcopy(cfg.calling), "campuses": copy.deepcopy(cfg.campuses)}
+    engine._base = {"calling": copy.deepcopy(cfg.calling), "campuses": copy.deepcopy(cfg.campuses),
+                    "dialer": copy.deepcopy(cfg.dialer)}
 
 
 def _stored(engine) -> dict:
@@ -56,9 +57,114 @@ def apply_overrides(engine) -> None:
             campuses[key]["counselors"] = [
                 {"name": c["name"], "numbers": [c["number"]], "on_duty": bool(c.get("on_duty", True))}
                 for c in ov["counselors"]]
+    integ = _integrations(engine)
+    dialer = copy.deepcopy(base["dialer"])
+    if integ.get("caller_id"):
+        for c in campuses.values():
+            c["caller_id"] = integ["caller_id"]
+    if integ.get("vapi_api_key") or integ.get("vapi_phone_number_id") or integ.get("vapi_server_secret"):
+        v = dict(dialer.get("vapi") or {})
+        for k_in, k_out in (("vapi_api_key", "api_key"), ("vapi_phone_number_id", "phone_number_id"),
+                            ("vapi_server_secret", "server_secret")):
+            if integ.get(k_in):
+                v[k_out] = integ[k_in]
+        dialer["vapi"] = v
+        if v.get("api_key") and v.get("phone_number_id"):
+            dialer["type"] = "vapi"
     cfg.calling.clear(); cfg.calling.update(calling)
     cfg.campuses.clear(); cfg.campuses.update(campuses)
+    changed = dialer != cfg.dialer
+    cfg.dialer.clear(); cfg.dialer.update(dialer)
     engine.c = cfg.calling
+    if changed:
+        from .dialers import dialer_from_config
+        engine.dialer = dialer_from_config(cfg)
+
+
+# ---------------- integrations (Vapi / Vobiz), admin only ----------------
+SECRET_KEYS = ("vapi_api_key", "vapi_server_secret")
+INTEG_KEYS = ("vapi_api_key", "vapi_phone_number_id", "vapi_server_secret", "caller_id")
+
+
+def _integrations(engine) -> dict:
+    try:
+        return json.loads(engine.store.kv_get("integrations") or "{}")
+    except ValueError:
+        return {}
+
+
+def _mask(v: str) -> str:
+    return ("•" * 8 + v[-4:]) if len(v) > 4 else ("•" * len(v))
+
+
+def integrations_view(engine) -> dict:
+    """What the admin page shows. Secrets are never sent back in full, only the last 4 characters."""
+    cfg, st = engine.cfg, _integrations(engine)
+    v = cfg.dialer.get("vapi") or {}
+    caller = next((c.get("caller_id", "") for c in cfg.campuses.values()), "")
+    eff = {"vapi_api_key": v.get("api_key", ""), "vapi_phone_number_id": v.get("phone_number_id", ""),
+           "vapi_server_secret": v.get("server_secret", ""), "caller_id": caller}
+    out = {}
+    for k in INTEG_KEYS:
+        val = eff[k] or ""
+        out[k] = {"set": bool(val), "value": _mask(val) if (k in SECRET_KEYS and val) else val,
+                  "from": "dashboard" if st.get(k) else ("server settings" if val else "")}
+    out["live"] = bool(eff["vapi_api_key"] and eff["vapi_phone_number_id"] and cfg.dialer.get("type") == "vapi")
+    return out
+
+
+def save_integrations(engine, payload: dict, now: datetime, who: str) -> dict:
+    """Blank field = keep what is saved. 'clear:<field>' in payload['clear'] removes a saved value."""
+    st = _integrations(engine)
+    changed = []
+    for k in INTEG_KEYS:
+        val = str(payload.get(k, "") or "").strip()
+        if not val:
+            continue
+        if k == "caller_id":
+            n = clean_phone(val)
+            if not n:
+                raise ValueError("Calling number: that is not a valid phone number")
+            counselors = {clean_phone(x) for c in engine.cfg.campuses.values()
+                          for co in c.get("counselors", []) for x in co["numbers"]}
+            if n in counselors:
+                raise ValueError("The calling number cannot be the same as a counselor's number")
+            val = n
+        elif any(ch.isspace() for ch in val):
+            raise ValueError(f"{k.replace('_', ' ')}: remove the spaces")
+        if k.startswith("vapi_") and len(val) < 8:
+            raise ValueError(f"{k.replace('_', ' ')} looks too short")
+        st[k] = val
+        changed.append(k)
+    for k in payload.get("clear") or []:
+        if k in INTEG_KEYS and k in st:
+            del st[k]
+            changed.append(k)
+    engine.store.kv_set("integrations", json.dumps(st))
+    engine.store.add_audit(now, who, "integrations", "changed: " + (", ".join(changed) or "nothing"))
+    apply_overrides(engine)
+    return integrations_view(engine)
+
+
+def test_vapi(engine) -> dict:
+    """Asks Vapi whether the saved key can see the saved phone number. Places no call."""
+    import requests
+    v = engine.cfg.dialer.get("vapi") or {}
+    if not (v.get("api_key") and v.get("phone_number_id")):
+        return {"ok": False, "message": "Save the Vapi key and the phone number ID first."}
+    try:
+        r = requests.get(f"https://api.vapi.ai/phone-number/{v['phone_number_id']}",
+                         headers={"Authorization": f"Bearer {v['api_key']}"}, timeout=10)
+    except Exception as e:
+        return {"ok": False, "message": f"Could not reach Vapi: {e}"}
+    if r.status_code == 401:
+        return {"ok": False, "message": "Vapi rejected the API key. Use the private key from Vapi > API Keys."}
+    if r.status_code == 404:
+        return {"ok": False, "message": "Vapi does not know that phone number ID under this key."}
+    if r.status_code >= 400:
+        return {"ok": False, "message": f"Vapi answered {r.status_code}."}
+    j = r.json() if r.content else {}
+    return {"ok": True, "message": "Vapi accepted the key and found the number " + str(j.get("number") or j.get("name") or "") + "."}
 
 
 def hours_map(calling: dict) -> dict:
@@ -151,6 +257,9 @@ def validate_settings(engine, payload: dict) -> dict:
                         raise ValueError("Each counselor needs a name (no curly brackets)")
                     if not num:
                         raise ValueError(f"{name}: that phone number is not valid")
+                    if num in {clean_phone(v["caller_id"]) for v in engine.cfg.campuses.values() if v.get("caller_id")}:
+                        raise ValueError(f"{name}: that is the number the system calls from. "
+                                         "A counselor number must be a different phone, or calls would loop")
                     cs.append({"name": name, "number": num, "on_duty": bool(x.get("on_duty", True))})
                 if not cs:
                     raise ValueError("Each campus needs at least one counselor")
