@@ -608,3 +608,33 @@ def test_integrations_saved_from_dashboard():
         ops.save_integrations(e, {"vapi_api_key": "short"}, MON_10AM, "juvel")
     ops.save_integrations(e, {"clear": ["vapi_api_key"]}, MON_10AM, "juvel")
     assert ops.integrations_view(e)["vapi_api_key"]["from"] != "dashboard"
+
+
+def test_vapi_payload_styles():
+    from juvelcall.dialers import VapiDialer
+    e, s, d, n = mk()
+    e.ingest([lead()], MON_10AM); e.tick(MON_10AM)
+    plan = d.calls[0]
+    new = VapiDialer("k", "pn").build_payload(plan)["assistant"]
+    tool = new["model"]["tools"][0]
+    assert tool["transferPlan"]["mode"] == "warm-transfer-experimental"
+    assert tool["transferPlan"]["transferAssistant"]["firstMessage"] == plan.whisper_text
+    assert tool["messages"][0]["content"] == plan.greeting_text and "firstMessage" not in new
+    assert tool["destinations"][0]["sipVerb"] == "dial" and new["firstMessageMode"].startswith("assistant-speaks-first-with")
+    old = VapiDialer("k", "pn", transfer_style="legacy").build_payload(plan)["assistant"]
+    assert old["firstMessage"] == plan.greeting_text and old["model"]["tools"][0]["destinations"][0]["transferPlan"]["mode"] == "warm-transfer-say-message"
+    wait = VapiDialer("k", "pn", immediate_transfer=False).build_payload(plan)["assistant"]
+    assert wait["firstMessage"] == plan.greeting_text and wait["model"]["tools"][0]["transferPlan"]["mode"] == "warm-transfer-experimental"
+
+
+def test_vapi_voice_from_dashboard():
+    e, s, d, n = mk()
+    e.ingest([lead()], MON_10AM); e.tick(MON_10AM)
+    plan = d.calls[0]
+    ops.snapshot_base(e)
+    ops.save_integrations(e, {"vapi_voice_id": "abcDEF123voice"}, MON_10AM, "juvel")
+    assert e.cfg.dialer["vapi"]["voice_id"] == "abcDEF123voice"
+    from juvelcall.dialers import VapiDialer
+    pl = VapiDialer("k", "pn", voice_id="abcDEF123voice").build_payload(plan)["assistant"]
+    assert pl["voice"]["provider"] == "11labs" and pl["voice"]["voiceId"] == "abcDEF123voice"
+    assert "voice" not in VapiDialer("k", "pn").build_payload(plan)["assistant"]

@@ -33,7 +33,7 @@ export async function loadSettings(): Promise<{ settings: SettingsData | null; a
 }
 
 export type IntegField = { set: boolean; value: string; from: string };
-export type IntegData = { vapi_api_key: IntegField; vapi_phone_number_id: IntegField; vapi_server_secret: IntegField; caller_id: IntegField; live: boolean };
+export type IntegData = { vapi_api_key: IntegField; vapi_phone_number_id: IntegField; vapi_server_secret: IntegField; caller_id: IntegField; vapi_voice_id: IntegField; live: boolean };
 
 export async function loadIntegrations(): Promise<{ data: IntegData | null; error?: string }> {
   if (!base()) return { data: null };

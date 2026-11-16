@@ -6,6 +6,7 @@ const FIELDS: { k: keyof Omit<IntegData, "live">; label: string; secret?: boolea
   { k: "vapi_api_key", label: "Vapi private API key", secret: true, ph: "paste the private key", hint: "Vapi dashboard > API Keys > Private Key. Never the public key." },
   { k: "vapi_phone_number_id", label: "Vapi phone number ID", ph: "e.g. 8f3c…", hint: "Vapi dashboard > Phone Numbers > click your Vobiz number > copy its ID." },
   { k: "vapi_server_secret", label: "Vapi webhook secret", secret: true, ph: "a long random value", hint: "Any long random value. Put the same value in Vapi as the x-vapi-secret header for the server URL." },
+  { k: "vapi_voice_id", label: "Voice (ElevenLabs voice ID)", ph: "e.g. a voice ID from ElevenLabs", hint: "Pick a female Indian-English voice in ElevenLabs, copy its Voice ID. In Vapi, add your ElevenLabs key under Providers first. Empty = Vapi's default voice." },
   { k: "caller_id", label: "Calling number (Vobiz)", ph: "+914440001111", hint: "The Vobiz number parents see. It must not be a counselor's own number." },
 ];
 

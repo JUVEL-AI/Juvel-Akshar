@@ -59,6 +59,8 @@ def apply_overrides(engine) -> None:
                 for c in ov["counselors"]]
     integ = _integrations(engine)
     dialer = copy.deepcopy(base["dialer"])
+    if integ.get("vapi_voice_id"):
+        v = dict(dialer.get("vapi") or {}); v["voice_id"] = integ["vapi_voice_id"]; dialer["vapi"] = v
     if integ.get("caller_id"):
         for c in campuses.values():
             c["caller_id"] = integ["caller_id"]
@@ -83,7 +85,7 @@ def apply_overrides(engine) -> None:
 
 # ---------------- integrations (Vapi / Vobiz), admin only ----------------
 SECRET_KEYS = ("vapi_api_key", "vapi_server_secret")
-INTEG_KEYS = ("vapi_api_key", "vapi_phone_number_id", "vapi_server_secret", "caller_id")
+INTEG_KEYS = ("vapi_api_key", "vapi_phone_number_id", "vapi_server_secret", "caller_id", "vapi_voice_id")
 
 
 def _integrations(engine) -> dict:
@@ -103,7 +105,8 @@ def integrations_view(engine) -> dict:
     v = cfg.dialer.get("vapi") or {}
     caller = next((c.get("caller_id", "") for c in cfg.campuses.values()), "")
     eff = {"vapi_api_key": v.get("api_key", ""), "vapi_phone_number_id": v.get("phone_number_id", ""),
-           "vapi_server_secret": v.get("server_secret", ""), "caller_id": caller}
+           "vapi_server_secret": v.get("server_secret", ""), "caller_id": caller,
+           "vapi_voice_id": v.get("voice_id", "")}
     out = {}
     for k in INTEG_KEYS:
         val = eff[k] or ""
@@ -132,7 +135,7 @@ def save_integrations(engine, payload: dict, now: datetime, who: str) -> dict:
             val = n
         elif any(ch.isspace() for ch in val):
             raise ValueError(f"{k.replace('_', ' ')}: remove the spaces")
-        if k.startswith("vapi_") and len(val) < 8:
+        if k.startswith("vapi_") and k != "vapi_voice_id" and len(val) < 8:
             raise ValueError(f"{k.replace('_', ' ')} looks too short")
         st[k] = val
         changed.append(k)
