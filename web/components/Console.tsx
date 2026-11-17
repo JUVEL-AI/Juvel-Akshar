@@ -24,7 +24,7 @@ const FILTERS: [string, string][] = [["all", "All"], ["transferred", "Transferre
 const mmss = (s: number | null) => (s === null ? "—" : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`);
 
 const STAGES = [
-  { label: "Greeting the parent", says: "PARENT HEARS", text: "Hello, calling from Akshar Arbol International School regarding your registration. Your counselor from the admissions team will speak with you now. Please stay on the line." },
+  { label: "Greeting the parent", says: "PARENT HEARS", text: "Hello, calling from Akshar Arbol International School regarding your registration. Your counselor from the admissions team will speak with you now. Please stay on the line. Connecting you to the counselor of your campus." },
   { label: "Ringing the counselor", says: "COUNSELOR PHONE", text: "Rings for 25 seconds. If nobody answers, the backup number is tried next." },
   { label: "Whisper to counselor", says: "COUNSELOR HEARS", text: "Admissions inquiry. Parent Suresh, student Rohan, class LKG, T Nagar campus. Connecting now." },
   { label: "Connected", says: "LIVE", text: "Parent and counselor are talking. The result is saved automatically." },
@@ -331,7 +331,7 @@ export default function Console({ data, demo, error, pinRequired = false, role =
               </div>
               <div>
                 <div className="eyebrow">What each person hears</div>
-                <div className="say2"><b style={{ color: "#6AA7FF" }}>PARENT</b><p>Hello, calling from Akshar Arbol International School regarding your registration. Your counselor from the admissions team will speak with you now. Please stay on the line.</p></div>
+                <div className="say2"><b style={{ color: "#6AA7FF" }}>PARENT</b><p>Hello, calling from Akshar Arbol International School regarding your registration. Your counselor from the admissions team will speak with you now. Please stay on the line. Connecting you to your counselor from our {label(sel.campus)} campus.</p></div>
                 <div className="say2"><b style={{ color: "#3DDC97" }}>COUNSELOR (BEFORE CONNECTING)</b><p>{whisperFor(sel, label(sel.campus))}</p></div>
                 <div className="say2"><b style={{ color: "#FFB547" }}>IF NOBODY PICKS UP</b><p>Thank you for staying on the call. Our admissions counselor will call you back shortly. We look forward to speaking with you soon.</p></div>
               </div>

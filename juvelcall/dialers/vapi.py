@@ -32,7 +32,7 @@ class VapiDialer(Dialer):
                 d["transferPlan"] = {"mode": "warm-transfer-say-message", "message": p.whisper_text}
             elif style == "blind":
                 # The setup tested live in Vapi: Vapi itself dials the counselor, no whisper.
-                d["message"] = "Connecting you now."
+                d["message"] = p.greeting_text          # this is the line Vapi speaks to the parent before it dials the counselor
                 d["numberE164CheckEnabled"] = True
                 d["transferPlan"] = {"mode": "blind-transfer", "sipVerb": self.sip_verb,
                                      "fallbackPlan": {"message": p.fallback_text, "endCallEnabled": True}}

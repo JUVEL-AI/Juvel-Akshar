@@ -46,7 +46,7 @@ campuses:
 
 messages:
   school_name: "Akshar Arbol International School"
-  greeting: "Hello, calling from {school_name} regarding your registration. {counselor_name} from the admissions team will speak with you now. Please stay on the line."
+  greeting: "Hello, calling from {school_name} regarding your registration. Your counselor from the admissions team will speak with you now. Please stay on the line. Connecting you to {counselor_name} from our {campus_label} campus."
   whisper_full: "Admissions inquiry. Parent {parent_name}, student {student_name}, class {grade}, {campus_label} campus. Connecting now."
   whisper_no_class: "Admissions inquiry. Parent {parent_name}, student {student_name}, {campus_label} campus. Connecting now."
   whisper_class_only: "Admissions inquiry. Parent {parent_name}, class {grade}, {campus_label} campus. Connecting now."

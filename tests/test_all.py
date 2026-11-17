@@ -620,6 +620,8 @@ def test_vapi_payload_styles():
     dest = tool["destinations"][0]
     assert dest["transferPlan"]["mode"] == "blind-transfer" and dest["transferPlan"]["sipVerb"] == "dial"
     assert dest["transferPlan"]["fallbackPlan"]["message"] == plan.fallback_text
+    assert dest["message"] == plan.greeting_text and "ECR campus" in plan.greeting_text and "Ms" not in "" and plan.counselor_name in plan.greeting_text
+    assert plan.greeting_text.startswith("Hello, calling from Akshar Arbol International School regarding your registration. Your counselor from the admissions team will speak with you now. Please stay on the line.")
     assert tool["messages"][0] == {"type": "request-start", "content": plan.greeting_text, "blocking": True}
     assert "firstMessage" not in b and b["firstMessageMode"].startswith("assistant-speaks-first-with")
     a = VapiDialer("k", "pn", transfer_style="assistant").build_payload(plan)["assistant"]["model"]["tools"][0]["destinations"][0]
