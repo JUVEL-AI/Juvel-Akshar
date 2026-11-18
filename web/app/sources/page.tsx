@@ -16,7 +16,7 @@ export default async function SourcesPage() {
           <div><h1>Lead sheets</h1><div className="sub">Which sheets the system reads · signed in as {who.user}</div></div></div>
         <div className="chips"><Link href="/" className="cbtn" style={{ textDecoration: "none" }}>← Back to dashboard</Link><LogoutButton /></div>
       </header>
-      {who.role !== "admin" ? <div className="card">Only an admin can choose the lead sheets.</div>
+      {who.role === "staff" ? <div className="card">Only an admin can choose the lead sheets.</div>
         : error ? <div className="card"><span className="chip bad">Backend not reachable</span></div>
         : <SourcesForm initial={data} />}
     </div>

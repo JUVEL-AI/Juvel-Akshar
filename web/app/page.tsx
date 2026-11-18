@@ -11,7 +11,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ d
   const who = await whoFromPage();
   // Recordings, transcripts and summaries stay with admins until an admin releases them in Settings.
   // They are removed here, on the server, so a staff browser never receives them.
-  if (who.role !== "admin" && !data.records_staff) {
+  if (who.role === "staff" && !data.records_staff) {
     data.leads = data.leads.map((l) => ({ ...l, calls: (l.calls ?? []).map((c) => ({ ...c, recording: "", transcript: "", summary: "" })) }));
     data.records_hidden = true;
   }

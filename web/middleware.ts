@@ -13,7 +13,7 @@ export async function middleware(req: NextRequest) {
     if (o && new URL(o).host !== req.headers.get("host")) return NextResponse.json({ ok: false, error: "Bad origin" }, { status: 403 });
   }
   if (!authOn()) {
-    headers.set("x-juvel-user", "dashboard"); headers.set("x-juvel-role", "admin");
+    headers.set("x-juvel-user", "dashboard"); headers.set("x-juvel-role", "super");
     return NextResponse.next({ request: { headers } });
   }
   if (path === "/login" || path === "/api/login" || path === "/api/logout" || path === "/privacy" || path.startsWith("/audio/")) return NextResponse.next({ request: { headers } });

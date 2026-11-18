@@ -1,5 +1,5 @@
 /** Session cookie for the dashboard. Works in the Edge middleware and in route handlers (Web Crypto only). */
-export type Role = "admin" | "staff";
+export type Role = "super" | "admin" | "staff";   // super: everything incl. phone/Vapi connections; admin: settings, sheets, recordings; staff: leads only
 export type U = { name: string; pw: string; role: Role };
 export const COOKIE = "juvel_session";
 export const SESSION_HOURS = 12;
@@ -7,7 +7,7 @@ export const SESSION_HOURS = 12;
 export function users(): U[] {
   return (process.env.CONSOLE_USERS ?? "").split(",").map((s) => s.trim()).filter(Boolean).map((s) => {
     const [name, pw, role] = s.split(":");
-    return { name, pw, role: role === "admin" ? "admin" : "staff" } as U;
+    return { name, pw, role: role === "super" ? "super" : role === "admin" ? "admin" : "staff" } as U;
   }).filter((u) => u.name && u.pw);
 }
 export const authOn = () => users().length > 0 || !!process.env.CONSOLE_PASSWORD;
@@ -39,7 +39,7 @@ export async function readToken(tok: string | undefined): Promise<{ user: string
   try {
     const p = JSON.parse(fromB64u(body));
     if (typeof p.e !== "number" || p.e < Date.now()) return null;
-    return { user: String(p.u), role: p.r === "admin" ? "admin" : "staff" };
+    return { user: String(p.u), role: p.r === "super" ? "super" : p.r === "admin" ? "admin" : "staff" };
   } catch { return null; }
 }
 
@@ -49,6 +49,6 @@ export function check(name: string, pw: string): { user: string; role: Role } | 
   const hit = list.find((u) => u.name.toLowerCase() === name.trim().toLowerCase() && same(u.pw, pw));
   if (hit) return { user: hit.name, role: hit.role };
   const shared = process.env.CONSOLE_PASSWORD;
-  if (!list.length && shared && same(shared, pw)) return { user: name.trim() || "admin", role: "admin" };
+  if (!list.length && shared && same(shared, pw)) return { user: name.trim() || "admin", role: "super" };
   return null;
 }

@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { base, secretHeaders, whoFromReq, needAdmin } from "@/lib/server";
+import { base, secretHeaders, whoFromReq, needSuper } from "@/lib/server";
 
 export async function PUT(req: NextRequest) {
-  const who = whoFromReq(req); const no = needAdmin(who); if (no) return no;
+  const who = whoFromReq(req); const no = needSuper(who); if (no) return no;
   if (!base()) return NextResponse.json({ ok: false, error: "Backend not set" }, { status: 400 });
   const body = await req.json().catch(() => ({}));
   const r = await fetch(`${base()}/api/integrations`, { method: "PUT", headers: secretHeaders(), cache: "no-store",

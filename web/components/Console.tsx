@@ -50,8 +50,9 @@ function timeline(l: Lead, campusLabel: string) {
   return t;
 }
 
-export default function Console({ data, demo, error, pinRequired = false, role = "admin", user = "", day }: { data: ConsoleData; demo: boolean; error?: string; pinRequired?: boolean; role?: "admin" | "staff"; user?: string; day?: string }) {
-  const admin = role === "admin";
+export default function Console({ data, demo, error, pinRequired = false, role = "admin", user = "", day }: { data: ConsoleData; demo: boolean; error?: string; pinRequired?: boolean; role?: "super" | "admin" | "staff"; user?: string; day?: string }) {
+  const admin = role !== "staff";
+  const superAdmin = role === "super";
   const router = useRouter();
   const [campus, setCampus] = useState("all");
   const [filter, setFilter] = useState("all");
@@ -152,8 +153,8 @@ export default function Console({ data, demo, error, pinRequired = false, role =
           <span className="chip"><span className="dot" />{data.hours_label ?? "Mon–Fri 8:30–2:30 · Sat 9:00–2:00"}</span>
           {admin && <Link href="/settings" className="chip" style={{ textDecoration: "none", color: "inherit" }}>⚙ Settings</Link>}
           {admin && <Link href="/sources" className="chip" style={{ textDecoration: "none", color: "inherit" }}>📄 Lead sheets</Link>}
-          {admin && <Link href="/integrations" className="chip" style={{ textDecoration: "none", color: "inherit" }}>🔌 Connections</Link>}
-          {user && <span className="chip" title="Signed in as">{user}{admin ? " · admin" : ""}</span>}
+          {superAdmin && <Link href="/integrations" className="chip" style={{ textDecoration: "none", color: "inherit" }}>🔌 Connections</Link>}
+          {user && <span className="chip" title="Signed in as">{user}{role === "super" ? " · super admin" : admin ? " · admin" : ""}</span>}
           {user && <LogoutButton />}
         </div>
       </header>
