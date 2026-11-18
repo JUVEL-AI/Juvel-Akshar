@@ -48,7 +48,7 @@ export default function TestLab({ campuses }: { campuses: Record<string, string>
           <button className="cbtn" onClick={clear}>Clear all test data</button>
         </div>
         {msg && <div className={`chip ${msg.ok ? "" : "bad"}`} role="status" style={{ marginTop: 10 }}>{msg.text}</div>}
-        <p className="sub">Calling must be <b>Started</b> on the main dashboard. A test works at any time of day.</p>
+        <p className="sub">The test has its own start button. It works even while real calling is <b>paused or stopped</b>, and at any time of day. A test is never retried.</p>
       </section>
 
       <section className="card set">

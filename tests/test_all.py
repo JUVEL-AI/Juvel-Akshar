@@ -930,3 +930,14 @@ def test_test_lab_validation_and_api():
     assert len(client.get("/api/test", headers=h).json()["leads"]) == 1
     assert client.delete("/api/test", headers=h).json()["deleted"] == 1
     assert client.get("/api/test").status_code == 401
+
+
+def test_test_call_goes_out_even_when_real_calling_is_paused_and_is_never_retried():
+    e, s, d, n = mk()
+    e.set_control("pause", MON_10AM, "juvel")
+    lid, why = e.create_test_lead(MON_10AM, "T", "", "", "9000000001", "ecr", "9000000002", "juvel")
+    assert why == "" and len(d.calls) == 1
+    e.handle_event(CallEvent(d.calls[-1].call_ref, EventKind.NO_ANSWER), MON_10AM)
+    e.set_control("start", MON_10AM, "juvel")
+    e.tick(MON_10AM + timedelta(hours=3))
+    assert len(d.calls) == 1                      # the test is not retried by the real dialer loop

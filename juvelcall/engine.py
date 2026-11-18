@@ -62,7 +62,7 @@ class Engine:
         old = self.control_state()
         parked = 0
         if new == "stopped":
-            for r in self.store.q("SELECT id FROM leads WHERE status IN (?,?)", (Status.QUEUED.value, Status.RETRY.value)):
+            for r in self.store.q("SELECT id FROM leads WHERE source<>'test' AND status IN (?,?)", (Status.QUEUED.value, Status.RETRY.value)):
                 self.store.update_lead(r["id"], now, status=Status.NEEDS_REVIEW.value, next_attempt_at=None,
                                        note="calling was stopped by an admin; please follow up by hand")
                 parked += 1
@@ -159,7 +159,7 @@ class Engine:
             self.watchdog(now)               # only closes stuck calls while paused/stopped
             return placed
         rows = self.store.q(
-            "SELECT * FROM leads WHERE status IN (?,?) AND next_attempt_at<=? ORDER BY next_attempt_at LIMIT ?",
+            "SELECT * FROM leads WHERE source<>'test' AND status IN (?,?) AND next_attempt_at<=? ORDER BY next_attempt_at LIMIT ?",
             (Status.QUEUED.value, Status.RETRY.value, iso(now), limit))
         for r in rows:
             made = parse(r["created_at"])
@@ -385,8 +385,10 @@ class Engine:
              f"test call by {who or 'super admin'}", "{}", iso(now)))
         self.store.kv_set(f"testnum_{lead_id}", c)
         self.store.add_audit(now, who, "test_call", f"test lead {lead_id}")
-        why = self.call_now(lead_id, now, who or "super admin")
-        return lead_id, why
+        # Own start button: a test goes out even while real calling is paused or stopped, and outside calling hours.
+        row = self.store.one("SELECT * FROM leads WHERE id=?", (lead_id,))
+        ref = self._place(row, now)
+        return lead_id, ("" if ref else "The call could not be placed. Check the Vapi connection and that the two phones differ from the calling number")
 
     def delete_test_data(self, now: datetime, who: str = "") -> int:
         n = 0
