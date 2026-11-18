@@ -625,7 +625,9 @@ def test_vapi_payload_styles():
     assert tool["messages"][0] == {"type": "request-start", "content": plan.greeting_text, "blocking": True}
     assert "firstMessage" not in b and b["firstMessageMode"].startswith("assistant-speaks-first-with")
     a = VapiDialer("k", "pn", transfer_style="assistant").build_payload(plan)["assistant"]["model"]["tools"][0]["destinations"][0]
-    assert a["transferPlan"]["mode"] == "warm-transfer-experimental" and a["transferPlan"]["transferAssistant"]["firstMessage"] == plan.whisper_text
+    assert a["transferPlan"]["mode"] == "warm-transfer-experimental" and a["transferPlan"]["transferAssistant"]["firstMessage"].endswith("Shall I connect the parent now?")
+    ta = a["transferPlan"]["transferAssistant"]
+    assert "Connecting now" not in ta["firstMessage"] and "transferSuccessful" in ta["model"]["messages"][0]["content"] and "transferCancel" in ta["model"]["messages"][0]["content"]
     old = VapiDialer("k", "pn", transfer_style="legacy").build_payload(plan)["assistant"]
     assert old["firstMessage"] == plan.greeting_text and old["model"]["tools"][0]["destinations"][0]["transferPlan"]["mode"] == "warm-transfer-say-message"
 

@@ -4,6 +4,15 @@ from .base import Dialer, DialerError
 from ..models import CallPlan
 
 
+def _ask(whisper: str) -> str:
+    """The announcement to the counselor ends with a question, so a person has something to answer."""
+    t = whisper.strip()
+    for tail in ("Connecting now.", "Connecting now"):
+        if t.endswith(tail):
+            t = t[: -len(tail)].strip()
+    return t + " Shall I connect the parent now?"
+
+
 class VapiDialer(Dialer):
     """Places the call through Vapi (the same engine Volant AI uses underneath).
     Inline assistant: says the greeting, then uses Vapi's transferCall with a warm transfer so the
@@ -48,12 +57,16 @@ class VapiDialer(Dialer):
                     "mode": "warm-transfer-experimental", "sipVerb": self.sip_verb,
                     **({"holdAudioUrl": self.hold_audio_url} if self.hold_audio_url else {}),
                     "transferAssistant": {
-                        "firstMessage": p.whisper_text, "firstMessageMode": "assistant-speaks-first",
-                        "maxDurationSeconds": 60, "silenceTimeoutSeconds": 15,
+                        # the counselor hears the announcement, answers, and only then is the parent connected
+                        "firstMessage": _ask(p.whisper_text), "firstMessageMode": "assistant-speaks-first",
+                        "maxDurationSeconds": 90, "silenceTimeoutSeconds": 20,
                         "model": {"provider": "openai", "model": "gpt-4o-mini", "temperature": 0,
                                   "messages": [{"role": "system", "content":
-                                      "You speak to the school counselor who just answered. You have already said the "
-                                      "announcement. Do not say anything else. Then connect the call."}]},
+                                      "You have just phoned a school admissions counselor on behalf of a parent who is waiting. "
+                                      "You have already said the announcement and asked if you may connect the parent. Wait for the reply. "
+                                      "If a person answers yes, okay, ready, go ahead, or anything similar, call transferSuccessful. "
+                                      "If you reach voicemail, an automated menu, or silence, or the person says they are busy or declines, "
+                                      "call transferCancel. Say nothing else and never chat."}]},
                     },
                     "fallbackPlan": {"message": p.fallback_text, "endCallEnabled": True},
                 }
