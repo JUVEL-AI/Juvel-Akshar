@@ -172,11 +172,11 @@ export default function Console({ data, demo, error, pinRequired = false, role =
             </div>
           </div>
         </div>
-        {admin ? <div className="ctl-btns">
+        <div className="ctl-btns">
           <button type="button" className="cbtn go" disabled={ctl === "running"} onClick={() => { setCtlErr(""); setAsk("start"); }}>▶ Start</button>
           <button type="button" className="cbtn pause" disabled={ctl !== "running"} onClick={() => { setCtlErr(""); setAsk("pause"); }}>⏸ Pause</button>
           <button type="button" className="cbtn stop" disabled={ctl === "stopped"} onClick={() => { setCtlErr(""); setAsk("stop"); }}>⏹ Stop</button>
-        </div> : <span className="sub">Only an admin can start, pause or stop calling.</span>}
+        </div>
       </section>
 
       {ask && (

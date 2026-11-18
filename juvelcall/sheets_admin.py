@@ -182,8 +182,14 @@ def validate(engine, payload: dict) -> dict:
             missing = [lab for k, lab, req in FIELDS if req and not cols.get(k)]
             if missing:
                 raise ValueError(f"{label}: choose the column for " + ", ".join(missing))
+        sf = str(s.get("start_from") or "").strip()
+        if sf:
+            try:
+                datetime.strptime(sf, "%Y-%m-%d")
+            except ValueError:
+                raise ValueError(f"{label}: the start date must look like 2026-11-01") from None
         out["sheets"].append({"id": str(s.get("id") or sid[:8] + str(i)), "label": label, "spreadsheet_id": sid,
-                              "worksheet": ws, "columns": cols, "enabled": bool(s.get("enabled", True))})
+                              "worksheet": ws, "columns": cols, "enabled": bool(s.get("enabled", True)), "start_from": sf})
     dc = str(payload.get("default_campus", "") or "").strip()
     if dc and dc not in engine._base["campuses"]:
         raise ValueError("Unknown default campus")
@@ -239,9 +245,19 @@ def poll_all(engine, now: datetime) -> dict:
             except Exception:
                 continue
         first = not engine.store.kv_get(key)
-        res = engine.ingest(leads, now, baseline=first)
+        sf = str(s.get("start_from") or "").strip()
+        since = None
+        if sf:
+            since = datetime.strptime(sf, "%Y-%m-%d").replace(tzinfo=engine.cfg.tz)
+            seen = engine.store.kv_get("sheet_since_" + s["id"])
+            if seen is not None and seen != sf and (engine.store.kv_get(key) or ""):     # date changed: re-open what the new date allows
+                engine.revive_since("sheet_" + s["id"], since, now)
+            engine.store.kv_set("sheet_since_" + s["id"], sf)
+        res = engine.ingest(leads, now, baseline=first and since is None, since=since)
+        if since:
+            res["from_date"] = sf
         if first:
             engine.store.kv_set(key, iso(now))
-            res["baseline"] = True
+            res["baseline"] = since is None
         out[s["label"]] = res
     return out

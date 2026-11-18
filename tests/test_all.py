@@ -943,3 +943,36 @@ def test_test_call_goes_out_even_when_real_calling_is_paused_and_is_never_retrie
     e.set_control("start", MON_10AM, "juvel")
     e.tick(MON_10AM + timedelta(hours=3))
     assert len(d.calls) == 1                      # the test is not retried by the real dialer loop
+
+
+# ---- start-from date per sheet, staff control
+def test_start_from_date_calls_newer_rows_even_if_old_and_paces_them():
+    from datetime import datetime
+    e, s, d, n = mk()
+    since = datetime(2026, 10, 8, tzinfo=e.cfg.tz)
+    rows = [lead(f"x{i}", phone=f"98765432{i:02d}", at=MON_10AM - timedelta(days=10 - (i % 3))) for i in range(5)]
+    rows.append(lead("old", phone="9876500000", at=MON_10AM - timedelta(days=40)))     # before the date: silent
+    out = e.ingest(rows, MON_10AM, since=since)
+    assert out["new"] == 6
+    assert s.one("SELECT status FROM leads WHERE key='old'")["status"] == "STALE"
+    assert s.one("SELECT COUNT(*) n FROM leads WHERE status='QUEUED' AND allow_old=1")["n"] == 5
+    placed = e.tick(MON_10AM)
+    assert len(placed) == 3                                   # paced: backfill_per_minute
+    assert len(e.tick(MON_10AM + timedelta(minutes=1))) == 2
+
+
+def test_start_from_change_revives_skipped_rows_and_validation():
+    from datetime import datetime
+    from juvelcall import sheets_admin
+    e, s, d, n = mk()
+    since = datetime(2026, 10, 15, tzinfo=e.cfg.tz)
+    e.ingest([lead("a", phone="9876543201", at=MON_10AM - timedelta(days=12))], MON_10AM, since=since)
+    assert s.one("SELECT status FROM leads WHERE key='a'")["status"] == "STALE"
+    assert e.revive_since("t", datetime(2026, 10, 1, tzinfo=e.cfg.tz), MON_10AM) in (0, 1)
+    with pytest.raises(ValueError):
+        sheets_admin.validate(e, {"sheets": [{"spreadsheet": "1" * 30, "worksheet": "S", "start_from": "10/11/2026", "columns": {"phone": "P", "created_at": "T"}}]})
+
+
+def test_staff_can_start_pause_stop_through_dashboard_route_source():
+    src = open("web/app/api/control/route.ts").read()
+    assert "needAdmin" not in src and "whoFromReq" in src

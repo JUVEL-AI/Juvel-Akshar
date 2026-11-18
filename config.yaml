@@ -18,6 +18,7 @@ calling:
   first_call_within_minutes: 5
   retry_minutes: [15, 60, 240]             # delay before attempt 2, 3, 4
   max_attempts: 4
+  backfill_per_minute: 3                   # catch-up from a chosen start date: at most this many older enquiries are called per minute
   stale_after_hours: 48                    # older leads are not auto-called
   dedupe_window_hours: 72                  # same phone inside this window = duplicate
   alert_if_not_called_after_minutes: 10    # inquiry arrived, no call placed

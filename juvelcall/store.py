@@ -69,6 +69,10 @@ class Store:
 
     def _migrate(self) -> None:
         """Adds the call-record columns to databases created before they existed."""
+        try:                                                 # leads called from an older 'start date' stay eligible past the 48 h rule
+            self.db.execute("ALTER TABLE leads ADD COLUMN " + ("IF NOT EXISTS " if self.pg else "") + "allow_old INTEGER DEFAULT 0")
+        except Exception:
+            pass
         for col, typ in self.CALL_COLS.items():
             try:
                 if self.pg:

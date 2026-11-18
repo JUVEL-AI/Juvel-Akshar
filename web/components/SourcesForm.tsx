@@ -5,7 +5,7 @@ import type { SourcesData, SheetCfg } from "@/lib/backend";
 type Preview = { title: string; tabs: string[]; worksheet: string; headers: string[]; row_count: number; sample: Record<string, string>[]; suggested: Record<string, string> };
 type Row = SheetCfg & { spreadsheet: string; preview?: Preview; busy?: boolean; err?: string };
 
-const blank = (n: number): Row => ({ id: "", label: `Sheet ${n}`, spreadsheet_id: "", spreadsheet: "", worksheet: "", enabled: true, columns: {} });
+const blank = (n: number): Row => ({ id: "", label: `Sheet ${n}`, spreadsheet_id: "", spreadsheet: "", worksheet: "", enabled: true, columns: {}, start_from: "" });
 
 export default function SourcesForm({ initial }: { initial: SourcesData | null }) {
   const [d, setD] = useState<SourcesData | null>(initial);
@@ -29,7 +29,7 @@ export default function SourcesForm({ initial }: { initial: SourcesData | null }
   const save = async () => {
     setBusy(true); setMsg(null);
     const res = await fetch("/api/sources", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
-      sheets: rows.map((r) => ({ id: r.id, label: r.label, spreadsheet: r.spreadsheet, worksheet: r.worksheet, columns: r.columns, enabled: r.enabled })), default_campus: dc, date_order: order }) });
+      sheets: rows.map((r) => ({ id: r.id, label: r.label, spreadsheet: r.spreadsheet, worksheet: r.worksheet, columns: r.columns, enabled: r.enabled, start_from: r.start_from ?? "" })), default_campus: dc, date_order: order }) });
     const j = await res.json().catch(() => ({}));
     if (res.ok) { setD(j.view); setMsg({ ok: true, text: "Saved. A sheet added now is read once to note who is already in it. Only enquiries that arrive after that are called." }); }
     else setMsg({ ok: false, text: j.error || "Could not save" });
@@ -51,6 +51,8 @@ export default function SourcesForm({ initial }: { initial: SourcesData | null }
           <div className="set-row">
             <label className="set-col" style={{ flex: 1 }}>Name
               <input value={r.label} onChange={(e) => upd(i, { label: e.target.value })} /></label>
+            <label className="set-col"><span>Call enquiries from date</span>
+              <input type="date" value={r.start_from ?? ""} onChange={(e) => upd(i, { start_from: e.target.value })} /></label>
             <label className="set-col"><span>Reading</span>
               <span><input type="checkbox" checked={r.enabled} onChange={(e) => upd(i, { enabled: e.target.checked })} /> On</span></label>
             <button className="cbtn" onClick={() => setRows(rows.filter((_, k) => k !== i))}>Remove</button>
@@ -89,6 +91,7 @@ export default function SourcesForm({ initial }: { initial: SourcesData | null }
         <button className="cbtn" onClick={() => setRows([...rows, blank(rows.length + 1)])}>+ Add another sheet</button>
         {(d.presets?.length ?? 0) > 0 && <button className="cbtn" onClick={() => setRows((d.presets ?? []).map((p) => ({ ...p, id: "", spreadsheet: p.spreadsheet_id })))}>Load Akshar Arbol sheets</button>}
       </div>
+      <p className="sub"><b>Call enquiries from date:</b> leave empty and only enquiries that arrive <i>after you save</i> are called. Pick a date and every enquiry on or after it is called (3 a minute, in calling hours); older ones stay silent. Move the date earlier later and the extra ones are called too.</p>
       {(d.presets?.length ?? 0) > 0 && <p className="sub">“Load Akshar Arbol sheets” fills in the school's Meta, Google Ads and website sheets with the right columns. Press Save sheets after sharing them with the address above.</p>}
 
       <section className="card set">

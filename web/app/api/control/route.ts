@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { base, secretHeaders, whoFromReq, needAdmin } from "@/lib/server";
+import { base, secretHeaders, whoFromReq } from "@/lib/server";
 
-/** Browser -> this route -> backend. Admin only. If CONTROL_PIN is set, the PIN is also required. */
+/** Browser -> this route -> backend. Any signed-in user (staff included) may start, pause or stop calling. If CONTROL_PIN is set, the PIN is also required. */
 export async function POST(req: NextRequest) {
-  const who = whoFromReq(req); const no = needAdmin(who); if (no) return no;
+  const who = whoFromReq(req);
   const body = await req.json().catch(() => ({}));
   const action = String(body.action ?? "");
   if (!base() || !["start", "pause", "stop"].includes(action)) return NextResponse.json({ ok: false, error: "bad request" }, { status: 400 });

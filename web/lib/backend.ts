@@ -44,7 +44,7 @@ export async function loadIntegrations(): Promise<{ data: IntegData | null; erro
   } catch (e) { return { data: null, error: String(e) }; }
 }
 
-export type SheetCfg = { id: string; label: string; spreadsheet_id: string; spreadsheet?: string; worksheet: string; enabled: boolean; columns: Record<string, string> };
+export type SheetCfg = { id: string; label: string; spreadsheet_id: string; spreadsheet?: string; worksheet: string; enabled: boolean; columns: Record<string, string>; start_from?: string };
 export type SourcesData = {
   sheets: SheetCfg[]; service_email: string; has_credentials: boolean; default_campus: string; date_order: string; from_server: boolean;
   presets?: SheetCfg[]; campuses: Record<string, string>; fields: { key: string; label: string; required: boolean }[];

@@ -83,7 +83,7 @@ class Engine:
         return self.control_info() | {"parked": parked}
 
     # ---------- intake ----------
-    def ingest(self, leads: list[RawLead], now: datetime, baseline: bool = False) -> dict:
+    def ingest(self, leads: list[RawLead], now: datetime, baseline: bool = False, since: datetime | None = None) -> dict:
         """baseline=True is the very first read of the school's sheet: every row already there is stored as STALE,
         so nobody who enquired before go-live is called or emailed about."""
         ops.apply_overrides(self)
@@ -92,11 +92,11 @@ class Engine:
             if self.store.one("SELECT 1 FROM leads WHERE source=? AND key=?", (lead.source, lead.key)):
                 out["skipped_existing"] += 1
                 continue
-            self._ingest_one(lead, now, baseline)
+            self._ingest_one(lead, now, baseline, since)
             out["new"] += 1
         return out
 
-    def _ingest_one(self, lead: RawLead, now: datetime, baseline: bool = False) -> int:
+    def _ingest_one(self, lead: RawLead, now: datetime, baseline: bool = False, since: datetime | None = None) -> int:
         phone = clean_phone(lead.phone)
         campus = canonical_campus(lead.campus)
         grade = clean_grade(lead.grade_text)
@@ -110,8 +110,13 @@ class Engine:
             campus = (self.cfg.sources.get("default_campus") or None) if open_answer else None
         status, note, next_at = Status.QUEUED, "", None
 
+        # 'start from date' (set per sheet on the dashboard): older rows stay silent, newer ones are called even if they
+        # are more than 48 hours old
+        catch_up = bool(since and lead.created_at >= since)
         if baseline:
             status, note = Status.STALE, "already in the sheet before go-live"
+        elif since and lead.created_at < since:
+            status, note = Status.STALE, "before the start date chosen for this sheet"
         elif not phone:
             status, note = Status.INVALID_PHONE, f"could not read phone '{lead.phone}'"
         elif self.store.is_dnc(phone):
@@ -120,7 +125,7 @@ class Engine:
             status, note = Status.DUPLICATE, "same phone already enquired recently"
         elif campus not in self.cfg.campuses:
             status, note = Status.NEEDS_REVIEW, f"unknown campus '{lead.campus}'"
-        elif now - lead.created_at > timedelta(hours=self.c["stale_after_hours"]):
+        elif not catch_up and now - lead.created_at > timedelta(hours=self.c["stale_after_hours"]):
             status, note = Status.STALE, "lead too old for automatic call"
         elif self.control_state() == "stopped":
             status, note = Status.NEEDS_REVIEW, "arrived while calling was stopped; please follow up by hand"
@@ -135,6 +140,8 @@ class Engine:
              clean_name(lead.student_name), phone, lead.phone, campus, lead.campus, grade, lead.grade_text,
              lead.email, lead.city, status.value, iso(next_at) if next_at else None, note,
              self.store.dump_raw(lead.raw), iso(now)))
+        if catch_up and status == Status.QUEUED:
+            self.store.update_lead(lead_id, now, allow_old=1)
         fresh = now - lead.created_at <= timedelta(hours=self.c["stale_after_hours"])
         if (status in (Status.INVALID_PHONE, Status.NEEDS_REVIEW) and fresh
                 and "while calling was stopped" not in note):                  # old rows (first sheet import) stay silent
@@ -161,9 +168,14 @@ class Engine:
         rows = self.store.q(
             "SELECT * FROM leads WHERE source<>'test' AND status IN (?,?) AND next_attempt_at<=? ORDER BY next_attempt_at LIMIT ?",
             (Status.QUEUED.value, Status.RETRY.value, iso(now), limit))
+        pace = int(self.c.get("backfill_per_minute", 3) or 3)       # older enquiries (start-date catch-up) go out a few a minute
+        caught_up = 0
         for r in rows:
             made = parse(r["created_at"])
-            if made and now - made > timedelta(hours=self.c["stale_after_hours"]) and self.store.kv_get(f"force_{r['id']}") is None:
+            if r["allow_old"] and caught_up >= pace:
+                continue
+            if (made and not r["allow_old"] and now - made > timedelta(hours=self.c["stale_after_hours"])
+                    and self.store.kv_get(f"force_{r['id']}") is None):
                 self.store.update_lead(r["id"], now, status=Status.STALE.value, next_attempt_at=None,
                                        note="waited too long (calling was paused or the system was down)")
                 continue
@@ -176,8 +188,22 @@ class Engine:
             ref = self._place(r, now)
             if ref:
                 placed.append(ref)
+                if r["allow_old"]:
+                    caught_up += 1
         self.watchdog(now)
         return placed
+
+    def revive_since(self, source: str, since: datetime, now: datetime) -> int:
+        """The start date was moved earlier: rows that were skipped as 'before the start date' and fall after it are queued."""
+        n = 0
+        for r in self.store.q("SELECT id,created_at FROM leads WHERE source=? AND status=? AND note LIKE ?",
+                              (source, Status.STALE.value, "before the start date%")):
+            made = parse(r["created_at"])
+            if made and made >= since:
+                self.store.update_lead(r["id"], now, status=Status.QUEUED.value, allow_old=1, note="",
+                                       next_attempt_at=iso(next_open(max(now, made), self.c, self.cfg.tz)))
+                n += 1
+        return n
 
     def build_plan(self, r) -> CallPlan:
         campus = self.cfg.campuses[r["campus"]]
