@@ -16,7 +16,7 @@ export async function middleware(req: NextRequest) {
     headers.set("x-juvel-user", "dashboard"); headers.set("x-juvel-role", "super");
     return NextResponse.next({ request: { headers } });
   }
-  if (path === "/login" || path === "/api/login" || path === "/api/logout" || path === "/privacy" || path.startsWith("/audio/")) return NextResponse.next({ request: { headers } });
+  if (path === "/login" || path === "/api/login" || path === "/api/logout" || path === "/privacy" || path === "/icon.svg" || path === "/apple-icon.png" || path === "/favicon.ico" || path.startsWith("/audio/")) return NextResponse.next({ request: { headers } });
   const who = await readToken(req.cookies.get(COOKIE)?.value);
   if (who) {
     headers.set("x-juvel-user", who.user); headers.set("x-juvel-role", who.role);

@@ -10,3 +10,9 @@ node_modules/
 .vercel/
 *.pem
 service-account*.json
+
+# never commit keys
+*service-account*.json
+juvel-calling-[0-9a-f]*.json
+*-key.json
+*.key
