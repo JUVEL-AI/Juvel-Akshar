@@ -3,6 +3,7 @@ import { useState, FormEvent } from "react";
 
 export default function Login() {
   const [name, setName] = useState(""); const [password, setPassword] = useState("");
+  const [show, setShow] = useState(false);
   const [err, setErr] = useState(""); const [busy, setBusy] = useState(false);
   const go = async (e: FormEvent) => {
     e.preventDefault(); setBusy(true); setErr("");
@@ -20,7 +21,11 @@ export default function Login() {
         <label className="sub" htmlFor="n">Name</label>
         <input id="n" type="text" autoComplete="username" autoCapitalize="none" value={name} onChange={(e) => setName(e.target.value)} required />
         <label className="sub" htmlFor="p">Password</label>
-        <input id="p" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+        <div style={{ position: "relative" }}>
+          <input id="p" type={show ? "text" : "password"} autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required style={{ width: "100%", boxSizing: "border-box", paddingRight: 70 }} />
+          <button type="button" className="cbtn" onClick={() => setShow(!show)} aria-pressed={show} aria-label={show ? "Hide password" : "Show password"}
+            style={{ position: "absolute", right: 6, top: 6, minHeight: 32, padding: "0 10px", fontSize: 13 }}>{show ? "Hide" : "Show"}</button>
+        </div>
         {err && <div className="chip bad" role="alert">{err}</div>}
         <button className="cbtn go" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
         <a className="sub" href="/privacy" style={{ textAlign: "center" }}>Privacy notice</a>
