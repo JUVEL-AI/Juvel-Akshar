@@ -5,6 +5,7 @@ import re
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from ..models import RawLead
+from ..normalize import clean_grade
 
 
 _SLASH = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{4})[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?$")
@@ -39,9 +40,14 @@ def lead_from_row(row: dict, cols: dict, tz: ZoneInfo, source: str, row_ref: str
         # give it an old date so it is stored as STALE and nobody is rung.
         when = LONG_AGO
         row = {**row, "_time_unreadable": created}
+    # Meta's form answers land in the wrong column now and then (a class in the 'school' column and a school in the
+    # 'class' column), so when a backup class column is chosen, use whichever of the two reads as a class.
+    grade = g("grade")
+    if g("grade_alt") and not clean_grade(grade) and clean_grade(g("grade_alt")):
+        grade = g("grade_alt")
     return RawLead(key=key, source=source, row_ref=row_ref, created_at=when,
                    name=g("name"), student_name=g("student_name"), phone=phone, campus=g("campus"),
-                   grade_text=g("grade"), city=g("city"), email=g("email"), raw=dict(row))
+                   grade_text=grade, city=g("city"), email=g("email"), raw=dict(row))
 
 
 def read_csv(path: str, cols: dict, tz: ZoneInfo, source: str = "csv", date_order: str = "mdy") -> list[RawLead]:

@@ -16,13 +16,18 @@ class VapiDialer(Dialer):
     def __init__(self, api_key: str, phone_number_id: str, server_secret: str = "",
                  timeout_seconds: int = 15, transfer_style: str = "blind",
                  immediate_transfer: bool = True, sip_verb: str = "dial",
-                 voice_id: str = "", voice_provider: str = "11labs", voice_model: str = "eleven_turbo_v2_5", **_):
+                 voice_id: str = "", voice_provider: str = "11labs", voice_model: str = "eleven_turbo_v2_5", voice_speed: float = 0.9, hold_audio_url: str = "", **_):
         self.api_key, self.phone_number_id = api_key, phone_number_id
         self.server_secret, self.timeout = server_secret, timeout_seconds
         self.transfer_style = transfer_style or "blind"      # blind (proven on the Vobiz trunk) | assistant (adds a whisper) | legacy
         self.immediate = bool(immediate_transfer)
         self.sip_verb = sip_verb or "dial"
         self.voice_id, self.voice_provider, self.voice_model = voice_id, voice_provider or "11labs", voice_model
+        self.hold_audio_url = (hold_audio_url or "").strip()
+        try:
+            self.voice_speed = min(1.2, max(0.7, float(voice_speed)))
+        except (TypeError, ValueError):
+            self.voice_speed = 0.9
 
     def _destinations(self, p: CallPlan, style: str) -> list:
         out = []
@@ -41,6 +46,7 @@ class VapiDialer(Dialer):
                 d["message"] = p.greeting_text if self.immediate else "Connecting you now."
                 d["transferPlan"] = {
                     "mode": "warm-transfer-experimental", "sipVerb": self.sip_verb,
+                    **({"holdAudioUrl": self.hold_audio_url} if self.hold_audio_url else {}),
                     "transferAssistant": {
                         "firstMessage": p.whisper_text, "firstMessageMode": "assistant-speaks-first",
                         "maxDurationSeconds": 60, "silenceTimeoutSeconds": 15,
@@ -79,7 +85,7 @@ class VapiDialer(Dialer):
         if self.voice_id:                      # a chosen voice (ElevenLabs by default); empty = Vapi's default voice
             v = {"provider": self.voice_provider, "voiceId": self.voice_id}
             if self.voice_provider == "11labs":
-                v.update({"model": self.voice_model, "stability": 0.5, "similarityBoost": 0.75})
+                v.update({"model": self.voice_model, "stability": 0.5, "similarityBoost": 0.75, "speed": self.voice_speed})
             assistant["voice"] = v
         if p.webhook_url:
             assistant["server"] = {"url": p.webhook_url, "secret": self.server_secret} if self.server_secret \
@@ -107,3 +113,13 @@ class VapiDialer(Dialer):
             raise
         except Exception as e:
             raise DialerError(f"vapi: {e}") from e
+
+    def delete_call_data(self, provider_call_id: str) -> bool:
+        """Erase Vapi's stored recording/transcript for this call (privacy: deletion request / retention). Best effort."""
+        if not provider_call_id:
+            return False
+        try:
+            r = requests.delete(f"{self.URL}/{provider_call_id}", headers={"Authorization": f"Bearer {self.api_key}"}, timeout=self.timeout)
+            return r.status_code < 300 or r.status_code == 404
+        except Exception:
+            return False

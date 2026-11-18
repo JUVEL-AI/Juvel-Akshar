@@ -62,6 +62,10 @@ def apply_overrides(engine) -> None:
     dialer = copy.deepcopy(base["dialer"])
     if integ.get("vapi_voice_id"):
         v = dict(dialer.get("vapi") or {}); v["voice_id"] = integ["vapi_voice_id"]; dialer["vapi"] = v
+    if integ.get("vapi_hold_audio_url"):
+        v = dict(dialer.get("vapi") or {}); v["hold_audio_url"] = integ["vapi_hold_audio_url"]; dialer["vapi"] = v
+    if integ.get("vapi_voice_speed"):
+        v = dict(dialer.get("vapi") or {}); v["voice_speed"] = integ["vapi_voice_speed"]; dialer["vapi"] = v
     if integ.get("vapi_transfer_style") in ("blind", "assistant"):
         v = dict(dialer.get("vapi") or {}); v["transfer_style"] = integ["vapi_transfer_style"]; dialer["vapi"] = v
     if integ.get("caller_id"):
@@ -94,7 +98,7 @@ def apply_overrides(engine) -> None:
 
 # ---------------- integrations (Vapi / Vobiz), admin only ----------------
 SECRET_KEYS = ("vapi_api_key", "vapi_server_secret", "google_service_account")
-INTEG_KEYS = ("vapi_api_key", "vapi_phone_number_id", "vapi_server_secret", "caller_id", "vapi_voice_id", "vapi_transfer_style", "google_service_account")
+INTEG_KEYS = ("vapi_api_key", "vapi_phone_number_id", "vapi_server_secret", "caller_id", "vapi_voice_id", "vapi_transfer_style", "google_service_account", "vapi_voice_speed", "vapi_hold_audio_url")
 
 
 def _integrations(engine) -> dict:
@@ -115,7 +119,8 @@ def integrations_view(engine) -> dict:
     caller = next((c.get("caller_id", "") for c in cfg.campuses.values()), "")
     eff = {"vapi_api_key": v.get("api_key", ""), "vapi_phone_number_id": v.get("phone_number_id", ""),
            "vapi_server_secret": v.get("server_secret", ""), "caller_id": caller,
-           "vapi_voice_id": v.get("voice_id", ""), "vapi_transfer_style": v.get("transfer_style", "blind")}
+           "vapi_voice_id": v.get("voice_id", ""), "vapi_transfer_style": v.get("transfer_style", "blind"),
+           "vapi_voice_speed": str(v.get("voice_speed", "0.9")), "vapi_hold_audio_url": v.get("hold_audio_url", "")}
     out = {}
     for k in INTEG_KEYS:
         val = eff.get(k) or ""
@@ -149,12 +154,23 @@ def save_integrations(engine, payload: dict, now: datetime, who: str) -> dict:
         elif k == "google_service_account":
             from .sheets_admin import validate_google_json
             val = validate_google_json(val)
+        elif k == "vapi_hold_audio_url":
+            if not (val.startswith("https://") and val.lower().split("?")[0].endswith((".mp3", ".wav"))):
+                raise ValueError("Hold music must be a public https link to an .mp3 or .wav file")
+        elif k == "vapi_voice_speed":
+            try:
+                sp = float(val)
+            except ValueError:
+                raise ValueError("Voice speed must be a number such as 0.9")
+            if not 0.7 <= sp <= 1.2:
+                raise ValueError("Voice speed must be between 0.7 (slower) and 1.2 (faster)")
+            val = str(sp)
         elif k == "vapi_transfer_style":
             if val not in ("blind", "assistant"):
                 raise ValueError("Transfer style must be 'blind' or 'assistant'")
         elif k != "google_service_account" and any(ch.isspace() for ch in val):
             raise ValueError(f"{k.replace('_', ' ')}: remove the spaces")
-        if k.startswith("vapi_") and k not in ("vapi_voice_id", "vapi_transfer_style") and len(val) < 8:
+        if k.startswith("vapi_") and k not in ("vapi_voice_id", "vapi_transfer_style", "vapi_voice_speed", "vapi_hold_audio_url") and len(val) < 8:
             raise ValueError(f"{k.replace('_', ' ')} looks too short")
         st[k] = val
         changed.append(k)
@@ -431,6 +447,12 @@ def periodic(engine, now: datetime) -> dict:
                     break
         out["reminders"] = sent
     local = now.astimezone(cfg.tz)
+    pkey = f"purge_{local.date()}"
+    if local.hour >= 2 and not store.kv_get(pkey):          # once a day, after 2am local
+        store.kv_set(pkey, "1")
+        res = engine.purge_old(now)
+        if res["recordings"] or res["leads"]:
+            out["purged"] = res
     w = window(cfg.calling, local.weekday())
     delay = timedelta(minutes=cfg.notifications.get("report_minutes_after_close", 30))
     if w:

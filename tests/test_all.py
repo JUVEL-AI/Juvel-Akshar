@@ -75,7 +75,7 @@ def test_happy_path_transfer():
     assert plan.parent_number == "+919876543210"
     assert plan.caller_id == cfg.campuses["ecr"]["caller_id"]
     assert "Parent Asha, student Aarav, class LKG, ECR campus" in plan.whisper_text
-    assert plan.greeting_text.startswith("Hello, calling from Akshar Arbol International School regarding your registration.")
+    assert plan.greeting_text.startswith("Hello, this is an automated call from Akshar Arbol International School regarding your registration. This call may be recorded.")
     assert plan.counselor_numbers == cfg.campuses["ecr"]["counselors"][0]["numbers"]   # no backup configured
     e.handle_event(CallEvent(refs[0], EventKind.TRANSFERRED, transferred_to="+910000000011"), MON_10AM)
     assert e.report() == {"TRANSFERRED": 1}
@@ -621,7 +621,7 @@ def test_vapi_payload_styles():
     assert dest["transferPlan"]["mode"] == "blind-transfer" and dest["transferPlan"]["sipVerb"] == "dial"
     assert dest["transferPlan"]["fallbackPlan"]["message"] == plan.fallback_text
     assert dest["message"] == plan.greeting_text and "ECR campus" in plan.greeting_text and "Ms" not in "" and plan.counselor_name in plan.greeting_text
-    assert plan.greeting_text.startswith("Hello, calling from Akshar Arbol International School regarding your registration. Your counselor from the admissions team will speak with you now. Please stay on the line.")
+    assert plan.greeting_text.startswith("Hello, this is an automated call from Akshar Arbol International School regarding your registration. This call may be recorded. Your counselor from the admissions team will speak with you now. Please stay on the line.")
     assert tool["messages"][0] == {"type": "request-start", "content": plan.greeting_text, "blocking": True}
     assert "firstMessage" not in b and b["firstMessageMode"].startswith("assistant-speaks-first-with")
     a = VapiDialer("k", "pn", transfer_style="assistant").build_payload(plan)["assistant"]["model"]["tools"][0]["destinations"][0]
@@ -756,3 +756,141 @@ def test_sheet_sources_from_dashboard(monkeypatch):
                       "which_campus_are_you_enquiring_for?": "either"})
     r2 = sa.poll_all(e, MON_10AM)
     assert s.one("SELECT status, campus FROM leads WHERE name='New Parent'")["campus"] == "ecr"                    # 'either' -> default campus
+
+
+def test_voice_speed_setting():
+    from juvelcall.dialers import VapiDialer
+    e, s, d, n = mk()
+    e.ingest([lead()], MON_10AM); e.tick(MON_10AM)
+    plan = d.calls[0]
+    assert VapiDialer("k", "pn", voice_id="v123456789").build_payload(plan)["assistant"]["voice"]["speed"] == 0.9
+    assert VapiDialer("k", "pn", voice_id="v123456789", voice_speed=5).build_payload(plan)["assistant"]["voice"]["speed"] == 1.2
+    ops.snapshot_base(e)
+    assert ops.save_integrations(e, {"vapi_voice_speed": "0.85"}, MON_10AM, "juvel")["vapi_voice_speed"]["value"] == "0.85"
+    with pytest.raises(ValueError):
+        ops.save_integrations(e, {"vapi_voice_speed": "3"}, MON_10AM, "juvel")
+
+
+def test_transfer_email_control_email_and_hold_music():
+    from juvelcall.dialers import VapiDialer
+    e, s, d, n = mk()
+    e.ingest([lead()], MON_10AM); e.tick(MON_10AM)
+    ref = d.calls[0].call_ref
+    n.sent.clear()
+    e.handle_event(CallEvent(ref, EventKind.TRANSFERRED, "v1", "+917550033275", ""), MON_10AM)
+    to, subj, body = n.sent[-1][0], n.sent[-1][1], n.sent[-1][2]
+    assert "Parent connected" in subj and "Asha" in body and "class: LKG" in body and to == e.cfg.campuses["ecr"]["alert_emails"]
+    n.sent.clear()
+    e.set_control("pause", MON_10AM, "juvel")
+    assert n.sent[-1][0] == ["bragadeeshsundararajan@gmail.com"]                  # not the school inboxes
+    plan = d.calls[0]
+    dest = VapiDialer("k", "pn", transfer_style="assistant", hold_audio_url="https://x.example/hold.mp3").build_payload(plan)["assistant"]["model"]["tools"][0]["destinations"][0]
+    assert dest["transferPlan"]["holdAudioUrl"] == "https://x.example/hold.mp3"
+    ops.snapshot_base(e)
+    with pytest.raises(ValueError):
+        ops.save_integrations(e, {"vapi_hold_audio_url": "http://x/y.mp3"}, MON_10AM, "juvel")
+    assert ops.save_integrations(e, {"vapi_hold_audio_url": "https://x.example/hold.mp3"}, MON_10AM, "juvel")["vapi_hold_audio_url"]["value"].endswith("hold.mp3")
+
+
+# ---- privacy / security hardening ----
+def test_greeting_discloses_automated_and_recorded():
+    e, *_ = mk()
+    g = e.cfg.messages["greeting"]
+    assert "automated call" in g and "may be recorded" in g
+
+
+def test_purge_erases_recordings_and_old_leads_and_asks_provider():
+    e, s, d, n = mk()
+    erased = []
+    d.delete_call_data = lambda pid: erased.append(pid) or True
+    e.cfg.data["privacy"] = {"recording_days": 30, "lead_days": 180}
+    e.ingest([lead("p1")], MON_10AM)
+    row = s.one("SELECT id FROM leads")
+    old = (MON_10AM - timedelta(days=40)).astimezone(timezone.utc).isoformat()
+    s.x("INSERT INTO calls(call_ref,lead_id,attempt,started_at,provider_call_id,recording_url,transcript) VALUES(?,?,?,?,?,?,?)",
+        ("c1", row["id"], 1, old, "prov-1", "https://rec", "hello"))
+    out = e.purge_old(MON_10AM)
+    assert out["recordings"] == 1 and erased == ["prov-1"]
+    assert s.one("SELECT recording_url,transcript FROM calls WHERE call_ref='c1'")["recording_url"] == ""
+    s.x("UPDATE leads SET updated_at=? WHERE id=?", ((MON_10AM - timedelta(days=200)).astimezone(timezone.utc).isoformat(), row["id"]))
+    assert e.purge_old(MON_10AM)["leads"] == 1 and s.one("SELECT 1 FROM leads") is None
+
+
+def test_delete_lead_asks_provider_to_erase_recording():
+    e, s, d, n = mk()
+    erased = []
+    d.delete_call_data = lambda pid: erased.append(pid) or True
+    e.ingest([lead("p2")], MON_10AM)
+    rid = s.one("SELECT id FROM leads")["id"]
+    s.x("INSERT INTO calls(call_ref,lead_id,attempt,started_at,provider_call_id) VALUES(?,?,?,?,?)", ("c2", rid, 1, "2026-10-19T04:00:00+00:00", "prov-2"))
+    assert e.delete_lead(rid, MON_10AM, "admin") == "" and erased == ["prov-2"]
+
+
+def test_integrations_encrypted_at_rest_when_data_key_set(monkeypatch):
+    monkeypatch.setenv("DATA_KEY", "unit-test-key")
+    s = Store()
+    s.kv_set("integrations", '{"vapi_api_key":"sk_live_secret"}')
+    raw = s.one("SELECT v FROM kv WHERE k='integrations'")["v"]
+    assert raw.startswith("enc:") and "sk_live_secret" not in raw
+    assert s.kv_get("integrations") == '{"vapi_api_key":"sk_live_secret"}'
+    monkeypatch.delenv("DATA_KEY")
+    assert s.kv_get("integrations") is None          # no key: never leak ciphertext
+
+
+def test_health_is_minimal_without_secret_and_secret_compare_works():
+    e, *_ = mk()
+    e.cfg.security["webhook_secret"] = "s3cret-value"
+    t = TestClient(create_app(e, clock=lambda: MON_10AM))
+    assert t.get("/health").json().get("leads") is None
+    assert t.get("/health", headers={"X-Webhook-Secret": "s3cret-value"}).json().get("leads") is not None
+    assert t.get("/api/audit", headers={"X-Webhook-Secret": "wrong"}).status_code == 401
+    assert t.get("/api/audit", headers={"X-Webhook-Secret": "s3cret-value"}).status_code == 200
+
+
+# ---- the school's real sheets (shapes taken from their exports)
+def test_real_campus_and_grade_values():
+    for raw, want in [("t_nagar_campus", "t_nagar"), ("t.nagar_campus", "t_nagar"), ("tng", "t_nagar"), ("T.Nagar", "t_nagar"),
+                      ("ecr_injambakkam_campus", "ecr"), ("ecr_campus", "ecr"), ("Injambakkam", "ecr"), ("ecr", "ecr"),
+                      ("either", None), ("either_of_them", None), ("", None)]:
+        assert canonical_campus(raw) == want, raw
+    for raw, want in [("elc-1", "ELC 1"), ("grade-9", "9th grade"), ("grade_1", "1st grade"), ("pre_kg", "Pre-KG"), ("Std 4", "4th grade"),
+                      ("toddler", "Toddler"), ("Toddler / Preschool", "Preschool"), ("IB DP", "IB Diploma"), ("AS/A Levels", "AS and A Levels"),
+                      ("as-a-levels", "AS and A Levels"), ("Euro kids", ""), ("Grades 1-5", ""), ("3rd", "3rd grade"), ("Ukg", "UKG")]:
+        assert clean_grade(raw) == want, raw
+
+
+def test_meta_sheet_swapped_school_and_grade_columns():
+    from juvelcall import sheets_admin
+    heads = ["Timing", "ad_name", "campaign_name", "which_campus_are_you_enquiring_for?", "which_school_is_your_child_currently_studying_in?",
+             "which_grade_is_your_child_currently_studying_in?", "full_name", "phone_number", "city", "email", "Lead Quality ", "Remarks on Parents"]
+    cols = sheets_admin.suggest_columns(heads)
+    assert cols["name"] == "full_name" and cols["phone"] == "phone_number" and cols["campus"].startswith("which_campus")
+    assert cols["grade"].startswith("which_grade") and cols["grade_alt"].startswith("which_school")
+    from juvelcall.sources.csv_source import lead_from_row
+    row = {"Timing": "2026-11-16T18:10:19+05:30", "which_campus_are_you_enquiring_for?": "ecr_injambakkam_campus",
+           "which_school_is_your_child_currently_studying_in?": "Grade 6", "which_grade_is_your_child_currently_studying_in?": "Chettinad vidhyashram",
+           "full_name": "Revathi", "phone_number": "p:+919600025990"}
+    lead_ = lead_from_row(row, cols, IST, "t", "r2")
+    e, s, d, n = mk()
+    e.ingest([lead_], MON_10AM)
+    r = s.one("SELECT campus,grade,phone FROM leads")
+    assert r["campus"] == "ecr" and r["grade"] == "6th grade" and r["phone"] == "+919600025990"
+
+
+def test_google_ads_and_website_tabs_suggestions():
+    from juvelcall import sheets_admin
+    c = sheets_admin.suggest_columns(["Timestamp", "Branch", "Student Name", "Class", "Phone", "Parent Name", "Message", "Quality ", "Remarks on Parents"])
+    assert (c["phone"], c["campus"], c["grade"], c["student_name"], c["name"]) == ("Phone", "Branch", "Class", "Student Name", "Parent Name")
+    w = sheets_admin.suggest_columns(["Timestamp", "Child Name", "Date of Birth", "Current Class", "Father Name", "Contact No", "Email", "Admission Class", "Campus Preference", "Current School"])
+    assert (w["phone"], w["grade"], w["student_name"], w["name"], w["campus"]) == ("Contact No", "Admission Class", "Child Name", "Father Name", "Campus Preference")
+    m = sheets_admin.suggest_columns(["id", "created_time", "ad_name", "adset_name", "campaign_name", "form_name", "grade", "campus", "email", "full_name", "phone_number"])
+    assert m["name"] == "full_name"
+
+
+def test_school_presets_offered_and_valid():
+    e, *_ = mk()
+    v = __import__("juvelcall.sheets_admin", fromlist=["view"]).view(e)
+    assert len(v["presets"]) == 4 and sum(1 for p in v["presets"] if p["enabled"]) == 3
+    from juvelcall import sheets_admin
+    out = sheets_admin.validate(e, {"sheets": [{**p, "spreadsheet": p["spreadsheet_id"]} for p in v["presets"]], "default_campus": "ecr", "date_order": "mdy"})
+    assert len(out["sheets"]) == 4

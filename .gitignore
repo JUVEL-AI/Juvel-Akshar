@@ -1,0 +1,12 @@
+.env
+.env.*
+!.env.example
+*.db
+__pycache__/
+.pytest_cache/
+.venv/
+node_modules/
+.next/
+.vercel/
+*.pem
+service-account*.json

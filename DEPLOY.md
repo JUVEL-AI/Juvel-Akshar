@@ -32,3 +32,11 @@ call immediately through the lead webhook.
 - Vercel's free Hobby plan is for personal, non-commercial use. A paid school service should be on a Pro plan.
 - The calling heartbeat is once a minute, so retry timing is accurate to about a minute.
 - If you would rather have one always-on server, `render.yaml` and the `Dockerfile` still work (optional).
+
+
+## Privacy and security settings (v2.8)
+- **Backend (`juvel-akshar-api`)**: add `DATA_KEY` (a long random string; keep a copy, if lost the saved Vapi/Google keys must be re-entered). It encrypts saved API keys in the database.
+- **Dashboard (`juvel-akshar-dashboard`)**: add `PRIVACY_CONTACT_EMAIL` (the school data contact shown on /privacy).
+- **Supabase**: run `supabase/security.sql` once in the SQL Editor (locks the tables against the public anon key).
+- **Retention** is in `config.yaml` under `privacy:` (recordings 30 days, enquiries 180 days; 0 = keep). A purge runs daily after 2am IST.
+- Put a consent line on the registration form: "I agree to be called, and the call may be recorded, for admissions."

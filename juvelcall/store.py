@@ -119,11 +119,35 @@ class Store:
     def add_audit(self, now: datetime, who: str, action: str, detail: str = "") -> None:
         self.x("INSERT INTO audit(created_at,who,action,detail) VALUES(?,?,?,?)", (iso(now), who or "system", action, detail[:500]))
 
+    SECRET_KEYS = ("integrations",)      # kv rows holding API keys: encrypted at rest when DATA_KEY is set
+
+    @staticmethod
+    def _fernet():
+        key = os.environ.get("DATA_KEY", "")
+        if not key:
+            return None
+        import base64, hashlib
+        from cryptography.fernet import Fernet
+        return Fernet(base64.urlsafe_b64encode(hashlib.sha256(key.encode()).digest()))
+
     def kv_get(self, k: str) -> str | None:
         r = self.one("SELECT v FROM kv WHERE k=?", (k,))
-        return r["v"] if r else None
+        v = r["v"] if r else None
+        if v and v.startswith("enc:"):
+            f = self._fernet()
+            if not f:
+                return None                  # key missing: behave as unset rather than leak ciphertext
+            try:
+                return f.decrypt(v[4:].encode()).decode()
+            except Exception:
+                return None
+        return v
 
     def kv_set(self, k: str, v: str) -> None:
+        if k in self.SECRET_KEYS:
+            f = self._fernet()
+            if f:
+                v = "enc:" + f.encrypt(v.encode()).decode()
         self.x("INSERT OR REPLACE INTO kv(k,v) VALUES(?,?)", (k, v))
 
     def is_dnc(self, phone: str) -> bool:

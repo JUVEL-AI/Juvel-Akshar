@@ -78,7 +78,8 @@ class Engine:
             extra = f" {parked} waiting enquiries were moved to Needs review." if parked else ""
             self._alert(now, f"control_{new}", None, f"Calling {self.CONTROL_LABEL[new].lower()} ({who})",
                         f"Automatic calling is now {self.CONTROL_LABEL[new].upper()}, set from the {who} at "
-                        f"{now.astimezone(self.cfg.tz):%d %b %H:%M}.{extra}")
+                        f"{now.astimezone(self.cfg.tz):%d %b %H:%M}.{extra}",
+                        to=self.cfg.notifications.get("control_emails") or None)
         return self.control_info() | {"parked": parked}
 
     # ---------- intake ----------
@@ -248,6 +249,10 @@ class Engine:
             self.store.update_lead(lead["id"], now, status=Status.TRANSFERRED.value,
                                    last_outcome="TRANSFERRED", transferred_to=ev.transferred_to,
                                    next_attempt_at=None)
+            camp = self.cfg.campuses.get(lead["campus"]) or {}
+            who = (self._on_duty(lead["campus"]) or {}).get("name", "the counselor")
+            self._alert(now, "transferred", lead["id"], f"Parent connected to {who}: {lead['name'] or 'name not given'} ({camp.get('label', lead['campus'])})",
+                        self._lead_summary(lead) + f"\nThe parent was connected to {who} at {now.astimezone(self.cfg.tz):%d %b %H:%M}.")
         elif ev.kind == EventKind.TRANSFER_FAILED:
             self.store.update_lead(lead["id"], now, status=Status.ANSWERED_NOT_TRANSFERRED.value,
                                    last_outcome="TRANSFER_FAILED", next_attempt_at=None)
@@ -346,11 +351,41 @@ class Engine:
             return "No such enquiry"
         if r["status"] == Status.CALLING.value:
             return "A call to this parent is in progress"
+        self._erase_lead(lead_id)
+        self.store.add_audit(now, who, "delete_lead", f"lead {lead_id}")
+        return ""
+
+    def _erase_lead(self, lead_id: int) -> None:
+        """Remove a lead, its calls and alerts, and ask the calling provider to erase its recordings/transcripts too."""
+        for c in self.store.q("SELECT provider_call_id FROM calls WHERE lead_id=?", (lead_id,)):
+            if c["provider_call_id"]:
+                self.dialer.delete_call_data(c["provider_call_id"])
         self.store.x("DELETE FROM calls WHERE lead_id=?", (lead_id,))
         self.store.x("DELETE FROM alerts WHERE lead_id=?", (lead_id,))
         self.store.x("DELETE FROM leads WHERE id=?", (lead_id,))
-        self.store.add_audit(now, who, "delete_lead", f"lead {lead_id}")
-        return ""
+
+    def purge_old(self, now: datetime) -> dict:
+        """Privacy retention. Recordings/transcripts are erased after privacy.recording_days, whole enquiries after
+        privacy.lead_days (0 = keep). Never touches a call in progress."""
+        pv = self.cfg.data.get("privacy", {})
+        rec_d, lead_d = int(pv.get("recording_days", 0) or 0), int(pv.get("lead_days", 0) or 0)
+        out = {"recordings": 0, "leads": 0}
+        if rec_d > 0:
+            cut = iso(now - timedelta(days=rec_d))
+            for c in self.store.q("SELECT call_ref,provider_call_id FROM calls WHERE started_at<? AND "
+                                  "(COALESCE(recording_url,'')<>'' OR COALESCE(transcript,'')<>'' OR COALESCE(summary,'')<>'')", (cut,)):
+                if c["provider_call_id"]:
+                    self.dialer.delete_call_data(c["provider_call_id"])
+                self.store.x("UPDATE calls SET recording_url='', transcript='', summary='' WHERE call_ref=?", (c["call_ref"],))
+                out["recordings"] += 1
+        if lead_d > 0:
+            cut = iso(now - timedelta(days=lead_d))
+            for r in self.store.q("SELECT id FROM leads WHERE updated_at<? AND status<>?", (cut, Status.CALLING.value)):
+                self._erase_lead(r["id"])
+                out["leads"] += 1
+        if out["recordings"] or out["leads"]:
+            self.store.add_audit(now, "system", "purge", f"recordings {out['recordings']}, enquiries {out['leads']}")
+        return out
 
     def resolve(self, lead_id: int, now: datetime, note: str = "", who: str = "") -> bool:
         """A person has dealt with this lead (called the parent back, etc.)."""

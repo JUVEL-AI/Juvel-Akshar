@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, Header, HTTPException, Response
+import hmac
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import console, ops, sheets_admin
@@ -68,12 +69,16 @@ def create_app(engine: Engine, clock=now_utc, run_loop: bool = False, loop_secon
                            allow_headers=["X-Webhook-Secret"])
 
     def auth(x_webhook_secret: str | None):
-        if not secret or x_webhook_secret != secret:   # fail closed: no secret configured = no access
+        if not secret or not x_webhook_secret or not hmac.compare_digest(x_webhook_secret.encode(), secret.encode()):   # fail closed; constant-time
             raise HTTPException(401, "bad secret")
 
     @app.get("/health")
-    def health():
-        return {"ok": True, "time": clock().isoformat(), "leads": engine.report()}
+    def health(x_webhook_secret: str | None = Header(default=None)):
+        """Public uptime check shows nothing about enquiries; counts only with the secret."""
+        out = {"ok": True, "time": clock().isoformat()}
+        if secret and x_webhook_secret and hmac.compare_digest(x_webhook_secret.encode(), secret.encode()):
+            out["leads"] = engine.report()
+        return out
 
     @app.post("/webhooks/lead")
     def lead(payload: dict, x_webhook_secret: str | None = Header(default=None)):
@@ -118,7 +123,7 @@ def create_app(engine: Engine, clock=now_utc, run_loop: bool = False, loop_secon
         """Vapi end-of-call report -> our call result. Only 'end-of-call-report' matters."""
         ops.apply_overrides(engine)               # the secret may have been saved from the dashboard
         vsecret = cfg.dialer.get("vapi", {}).get("server_secret", "")
-        if not vsecret or x_vapi_secret != vsecret:
+        if not vsecret or not x_vapi_secret or not hmac.compare_digest(x_vapi_secret.encode(), vsecret.encode()):
             raise HTTPException(401, "bad secret")
         msg = payload.get("message", payload)
         if msg.get("type") != "end-of-call-report":

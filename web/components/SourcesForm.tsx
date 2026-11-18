@@ -85,7 +85,11 @@ export default function SourcesForm({ initial }: { initial: SourcesData | null }
             </div>)}
         </section>
       ))}
-      <button className="cbtn" onClick={() => setRows([...rows, blank(rows.length + 1)])}>+ Add another sheet</button>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <button className="cbtn" onClick={() => setRows([...rows, blank(rows.length + 1)])}>+ Add another sheet</button>
+        {(d.presets?.length ?? 0) > 0 && <button className="cbtn" onClick={() => setRows((d.presets ?? []).map((p) => ({ ...p, id: "", spreadsheet: p.spreadsheet_id })))}>Load Akshar Arbol sheets</button>}
+      </div>
+      {(d.presets?.length ?? 0) > 0 && <p className="sub">“Load Akshar Arbol sheets” fills in the school's Meta, Google Ads and website sheets with the right columns. Press Save sheets after sharing them with the address above.</p>}
 
       <section className="card set">
         <h2>Rules for all sheets</h2>

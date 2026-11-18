@@ -14,3 +14,7 @@ class Dialer(ABC):
 
     @abstractmethod
     def place_call(self, plan: CallPlan) -> str: ...
+
+    def delete_call_data(self, provider_call_id: str) -> bool:
+        """Ask the provider to erase its stored recording/transcript for one call. Best effort; default does nothing."""
+        return False

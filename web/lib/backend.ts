@@ -33,7 +33,7 @@ export async function loadSettings(): Promise<{ settings: SettingsData | null; a
 }
 
 export type IntegField = { set: boolean; value: string; from: string };
-export type IntegData = { vapi_api_key: IntegField; vapi_phone_number_id: IntegField; vapi_server_secret: IntegField; caller_id: IntegField; vapi_voice_id: IntegField; vapi_transfer_style: IntegField; google_service_account: IntegField; live: boolean };
+export type IntegData = { vapi_api_key: IntegField; vapi_phone_number_id: IntegField; vapi_server_secret: IntegField; caller_id: IntegField; vapi_voice_id: IntegField; vapi_transfer_style: IntegField; google_service_account: IntegField; vapi_voice_speed: IntegField; vapi_hold_audio_url: IntegField; live: boolean };
 
 export async function loadIntegrations(): Promise<{ data: IntegData | null; error?: string }> {
   if (!base()) return { data: null };
@@ -47,7 +47,7 @@ export async function loadIntegrations(): Promise<{ data: IntegData | null; erro
 export type SheetCfg = { id: string; label: string; spreadsheet_id: string; spreadsheet?: string; worksheet: string; enabled: boolean; columns: Record<string, string> };
 export type SourcesData = {
   sheets: SheetCfg[]; service_email: string; has_credentials: boolean; default_campus: string; date_order: string; from_server: boolean;
-  campuses: Record<string, string>; fields: { key: string; label: string; required: boolean }[];
+  presets?: SheetCfg[]; campuses: Record<string, string>; fields: { key: string; label: string; required: boolean }[];
 };
 export async function loadSources(): Promise<{ data: SourcesData | null; error?: string }> {
   if (!base()) return { data: null };

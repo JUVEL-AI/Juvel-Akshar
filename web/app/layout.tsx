@@ -1,16 +1,20 @@
 import "./globals.css";
+import "@fontsource/manrope/400.css";
+import "@fontsource/manrope/500.css";
+import "@fontsource/manrope/600.css";
+import "@fontsource/manrope/700.css";
+import "@fontsource/manrope/800.css";
+import "@fontsource/jetbrains-mono/400.css";
+import "@fontsource/jetbrains-mono/500.css";
+import "@fontsource/jetbrains-mono/600.css";
 import type { ReactNode } from "react";
 
+// Fonts ship inside our own app (npm packages), so visitors' browsers never contact Google (no IP leak).
 export const metadata = { title: "Juvel Calling · Admissions", description: "Admissions call console" };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
-        <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
-      </head>
       <body>{children}</body>
     </html>
   );

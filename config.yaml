@@ -46,7 +46,7 @@ campuses:
 
 messages:
   school_name: "Akshar Arbol International School"
-  greeting: "Hello, calling from {school_name} regarding your registration. Your counselor from the admissions team will speak with you now. Please stay on the line. Connecting you to {counselor_name} from our {campus_label} campus."
+  greeting: "Hello, this is an automated call from {school_name} regarding your registration. This call may be recorded. Your counselor from the admissions team will speak with you now. Please stay on the line. Connecting you to {counselor_name} from our {campus_label} campus."
   whisper_full: "Admissions inquiry. Parent {parent_name}, student {student_name}, class {grade}, {campus_label} campus. Connecting now."
   whisper_no_class: "Admissions inquiry. Parent {parent_name}, student {student_name}, {campus_label} campus. Connecting now."
   whisper_class_only: "Admissions inquiry. Parent {parent_name}, class {grade}, {campus_label} campus. Connecting now."
@@ -55,6 +55,7 @@ messages:
 
 notifications:
   admin_emails: ["admissions.tng@akshararbol.edu.in", "admissions.ecr@akshararbol.edu.in", "bragadeeshsundararajan@gmail.com"]   # fallback + copies; each campus also has its own alert_emails
+  control_emails: ["bragadeeshsundararajan@gmail.com"]   # who is emailed when someone presses Start / Pause / Stop (empty = the admin_emails above)
   report_minutes_after_close: 30           # daily summary email goes out this long after calling hours end
   parent_followup:                         # optional message to the parent via Make (e.g. WhatsApp). OFF until the school agrees
     enabled: false
@@ -69,6 +70,11 @@ notifications:
     password: ${SMTP_PASSWORD}
     sender: ${SMTP_SENDER}                 # usually the same as SMTP_USER
 
+privacy:
+  recording_days: 30      # erase call recordings, transcripts and summaries after this many days (0 = keep)
+  lead_days: 180          # erase the whole enquiry after this many days (0 = keep)
+  contact_email: ""       # shown on the privacy notice (school's data contact)
+
 security:
   webhook_secret: ${WEBHOOK_SECRET}        # sent as header X-Webhook-Secret
   allowed_origins: []                      # leave empty: the Vercel app calls us from its server
@@ -80,11 +86,13 @@ dialer:
     api_key: ${VAPI_API_KEY}
     phone_number_id: ${VAPI_PHONE_NUMBER_ID}   # Vapi's id for the number that dials out
     server_secret: ${VAPI_SERVER_SECRET}     # must match the secret sent to /webhooks/vapi
-    transfer_style: blind                    # blind = tested live on the Vobiz trunk (no whisper) | assistant = adds the whisper (untested) | legacy = old mode (Twilio only)
+    transfer_style: assistant                # assistant = counselor hears the parent's name and the parent hears music (set on the Connections page to go back to blind)
     immediate_transfer: true                 # true = transfer starts at once; false = greeting first, then the model waits for the parent to speak
     voice_id: ${VAPI_VOICE_ID}               # ElevenLabs voice ID (set on the dashboard Connections page). Empty = Vapi's default voice
     voice_provider: 11labs
-    voice_model: eleven_turbo_v2_5
+    voice_model: eleven_multilingual_v2
+    hold_audio_url: "https://juvel-akshar-dashboard.vercel.app/audio/hold.mp3"                       # soft music the parent hears while the counselor is called (used by transfer_style: assistant)
+    voice_speed: 0.9                         # 0.7 slower to 1.2 faster. Set on the dashboard Connections page
     sip_verb: dial                           # dial = Vapi places the counselor call itself; refer = needs the carrier to support SIP REFER
   http:
     url: ""
@@ -99,6 +107,27 @@ sources:
     spreadsheet_id: ${SHEET_ID}
     worksheet: "Sheet1"
     poll_seconds: 60
+  presets:                                 # the school's real sheets: the Lead sheets page offers them with one click (confirmed from their exports)
+    - label: "Meta leads (AAIS Leads)"
+      spreadsheet_id: "1qSsvxlDE639YOw6wsi_Tv_d4IzYhMBIL52B7hwgM59w"
+      worksheet: "Sheet1"
+      enabled: true
+      columns: {created_at: "Timing", name: "full_name", phone: "phone_number", campus: "which_campus_are_you_enquiring_for?", grade: "which_grade_is_your_child_currently_studying_in?", grade_alt: "which_school_is_your_child_currently_studying_in?", email: "email", city: "city"}
+    - label: "Google Ads leads (AAIS Leads)"
+      spreadsheet_id: "1qSsvxlDE639YOw6wsi_Tv_d4IzYhMBIL52B7hwgM59w"
+      worksheet: "Google Ads"
+      enabled: true
+      columns: {created_at: "Timestamp", name: "Parent Name", student_name: "Student Name", phone: "Phone", campus: "Branch", grade: "Class"}
+    - label: "Website registrations"
+      spreadsheet_id: "1hqnfahxY-agKd8NiJ4l3lpz8Q4W3DzRjUYQdhJO0iLY"
+      worksheet: "SM Lead"
+      enabled: true
+      columns: {created_at: "Timestamp", name: "Father Name", student_name: "Child Name", phone: "Contact No", campus: "Campus Preference", grade: "Admission Class", email: "Email"}
+    - label: "Old Meta leads (stopped May 2026)"
+      spreadsheet_id: "1hqnfahxY-agKd8NiJ4l3lpz8Q4W3DzRjUYQdhJO0iLY"
+      worksheet: "Meta leads"
+      enabled: false
+      columns: {created_at: "created_time", name: "full_name", phone: "phone_number", campus: "campus", grade: "grade", email: "email"}
   date_order: mdy                          # how this sheet writes 10/29/2026 (month first). A day above 12 is always read as a day.
   default_campus: "ecr"                       # campus for leads who answered "either" or left it blank. Empty = a person checks them (NEEDS_REVIEW). ASK THE SCHOOL
   csv_columns:                             # the school's Meta lead sheet column titles (confirmed from their export)

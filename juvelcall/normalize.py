@@ -6,7 +6,10 @@ import phonenumbers
 _GRADE_WORDS = {
     "nursery": "Nursery", "pre kg": "Pre-KG", "prekg": "Pre-KG", "pre-kg": "Pre-KG",
     "lkg": "LKG", "ukg": "UKG", "playgroup": "Playgroup", "play group": "Playgroup",
-    "toddler": "Toddler",
+    "toddler": "Toddler", "preschool": "Preschool", "pre school": "Preschool", "play school": "Preschool",
+    "playschool": "Preschool", "toddler preschool": "Preschool", "kindergarten": "Kindergarten",
+    "ib dp": "IB Diploma", "ibdp": "IB Diploma", "ib diploma": "IB Diploma",
+    "as a levels": "AS and A Levels", "as a level": "AS and A Levels", "a levels": "AS and A Levels",
 }
 _ORD = {1: "1st", 2: "2nd", 3: "3rd"}
 
@@ -45,9 +48,9 @@ def canonical_campus(raw: str, campus_keys: list[str] | None = None) -> str | No
         return None
     t = re.sub(r"[^a-z0-9]+", " ", raw.lower()).strip()
     compact = t.replace(" ", "")
-    if "ecr" in compact or "eastcoast" in compact:
+    if "ecr" in compact or "eastcoast" in compact or "injambakkam" in compact or "neelankarai" in compact:
         return "ecr"
-    if "tnagar" in compact or "thyagaraya" in compact or "nagar" in compact:
+    if "tnagar" in compact or "thyagaraya" in compact or "nagar" in compact or t in ("tng", "t n") or compact.startswith("tng"):
         return "t_nagar"
     return None
 
@@ -56,10 +59,14 @@ def clean_grade(raw: str) -> str:
     """Return a spoken-friendly class, or '' when unclear (e.g. a school name in the grade column)."""
     if not raw:
         return ""
-    t = re.sub(r"\s+", " ", raw.strip().lower().replace("_", " ").replace("-", " "))
+    t = re.sub(r"\s+", " ", raw.strip().lower().replace("_", " ").replace("-", " ").replace("/", " "))
+    t = re.sub(r"^as and a levels$", "as a levels", t)
     for k, v in _GRADE_WORDS.items():
         if re.fullmatch(rf"(class |grade |std )?{re.escape(k)}", t):
             return v
+    m = re.fullmatch(r"elc ?(\d)", t)                 # early learning centre: 'elc-1'
+    if m:
+        return f"ELC {m.group(1)}"
     m = re.fullmatch(r"(?:class|grade|std|standard)?\s*(\d{1,2})(?:st|nd|rd|th)?(?:\s*(?:std|standard|grade|class))?", t)
     if m:
         n = int(m.group(1))

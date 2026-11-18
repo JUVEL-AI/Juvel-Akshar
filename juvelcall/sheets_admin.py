@@ -11,7 +11,8 @@ from .normalize import clean_phone
 
 FIELDS = [  # key, label, required
     ("phone", "Parent phone", True), ("name", "Parent name", True), ("campus", "Campus", False),
-    ("grade", "Class / grade", False), ("student_name", "Student name", False), ("created_at", "Time of enquiry", True),
+    ("grade", "Class / grade", False), ("grade_alt", "Class / grade (backup column, if parents sometimes fill the wrong one)", False),
+    ("student_name", "Student name", False), ("created_at", "Time of enquiry", True),
     ("email", "Email", False), ("city", "City", False)]
 REQUIRED = [k for k, _, r in FIELDS if r]
 ID_RE = re.compile(r"/d/([A-Za-z0-9_-]{20,})")
@@ -65,15 +66,23 @@ def suggest_columns(headers: list[str]) -> dict:
                 return raw
         return ""
     out = {
-        "phone": pick(lambda n: any(w in n for w in ("phone", "mobile", "whatsapp", "contact number", "contact no"))),
+        "phone": pick(lambda n: any(w in n for w in ("phone", "mobile", "whatsapp", "contact number", "contact no", "contactno"))),
         "campus": pick(lambda n: "campus" in n or "branch" in n),
-        "grade": pick(lambda n: any(w in n for w in ("grade", "class", "standard", "std")), avoid=("school", "campaign")),
+        "grade": pick(lambda n: any(w in n for w in ("admission", "applying", "sought")) and any(w in n for w in ("grade", "class")), avoid=("school",))
+        or pick(lambda n: any(w in n for w in ("grade", "class", "standard", "std")), avoid=("school", "campaign")),
+        "grade_alt": "",
         "email": pick(lambda n: "email" in n or "e mail" in n),
         "city": pick(lambda n: n in ("city", "location", "area") or n.endswith(" city")),
         "created_at": pick(lambda n: any(w in n for w in ("timing", "timestamp", "created", "submitted", "date", "time")) and "willing" not in n),
         "student_name": pick(lambda n: any(w in n for w in ("student", "child")) and "name" in n, avoid=("school", "grade", "class")),
     }
-    out["name"] = pick(lambda n: "name" in n, avoid=("student", "child", "ad ", "campaign", "school", "sheet", "profile")) \
+    # Meta's form: one question asks the school, one the grade; answers often swap. Offer the other as the backup.
+    school_q = pick(lambda n: "school" in n and "currently" in n)
+    grade_q = pick(lambda n: "grade" in n and "currently" in n)
+    if school_q and grade_q:
+        out["grade"], out["grade_alt"] = grade_q, school_q
+    out["name"] = pick(lambda n: n in ("full name", "parent name", "name") or n.startswith("full name")) \
+        or pick(lambda n: "name" in n, avoid=("student", "child", "ad ", "adset", "campaign", "school", "sheet", "profile", "form")) \
         or pick(lambda n: n in ("name", "parent", "parent name"))
     return out
 
@@ -201,6 +210,7 @@ def view(engine) -> dict:
     sc = engine.cfg.sources or {}
     return {"sheets": d["sheets"], "service_email": service_email(creds), "has_credentials": bool(creds),
             "default_campus": sc.get("default_campus", "") or "", "date_order": sc.get("date_order", "mdy"),
+            "presets": [{**p, "spreadsheet": p["spreadsheet_id"]} for p in sc.get("presets", [])],
             "from_server": bool(not d["sheets"] and configured(engine)),
             "campuses": {k: v["label"] for k, v in engine.cfg.campuses.items()},
             "fields": [{"key": k, "label": lab, "required": req} for k, lab, req in FIELDS]}

@@ -7,3 +7,5 @@ phonenumbers>=8.13
 gspread>=6.0
 # Supabase Postgres driver
 psycopg[binary]>=3.1
+# encrypts saved API keys at rest (set DATA_KEY)
+cryptography>=42

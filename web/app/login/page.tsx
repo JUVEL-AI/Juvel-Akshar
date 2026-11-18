@@ -23,6 +23,7 @@ export default function Login() {
         <input id="p" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
         {err && <div className="chip bad" role="alert">{err}</div>}
         <button className="cbtn go" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
+        <a className="sub" href="/privacy" style={{ textAlign: "center" }}>Privacy notice</a>
       </form>
     </div>
   );
