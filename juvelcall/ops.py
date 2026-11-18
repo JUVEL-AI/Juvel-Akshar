@@ -328,7 +328,7 @@ def save_settings(engine, payload: dict, now: datetime, who: str) -> dict:
 
 # ---------------- reports ----------------
 def _day_rows(engine, day_start: datetime):
-    return engine.store.q("SELECT * FROM leads WHERE created_at>=? AND created_at<? ORDER BY created_at",
+    return engine.store.q("SELECT * FROM leads WHERE created_at>=? AND created_at<? AND source<>'test' ORDER BY created_at",
                           (iso(day_start), iso(day_start + timedelta(days=1))))
 
 
@@ -395,7 +395,7 @@ def weekly_report(engine, now: datetime):
     cfg = engine.cfg
     local = now.astimezone(cfg.tz)
     monday = (local - timedelta(days=local.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
-    rows = engine.store.q("SELECT * FROM leads WHERE created_at>=? AND created_at<? ORDER BY created_at",
+    rows = engine.store.q("SELECT * FROM leads WHERE created_at>=? AND created_at<? AND source<>'test' ORDER BY created_at",
                           (iso(monday), iso(monday + timedelta(days=7))))
     first = _first_call_seconds(engine)
     lines = [f"Weekly admissions calling report: {monday:%d %b} to {(monday + timedelta(days=5)):%d %b %Y}", ""]
@@ -434,7 +434,7 @@ def periodic(engine, now: datetime) -> dict:
     if in_hours(now, cfg.calling, cfg.tz) and mins:
         sent = 0
         recent = iso(now - timedelta(days=3))
-        for r in store.q("SELECT * FROM leads WHERE status IN (?,?) AND updated_at>=?",
+        for r in store.q("SELECT * FROM leads WHERE source<>'test' AND status IN (?,?) AND updated_at>=?",
                          (Status.ANSWERED_NOT_TRANSFERRED.value, Status.NO_RESPONSE.value, recent)):
             waited = (now - parse(r["updated_at"])).total_seconds() / 60
             for i, m in enumerate(mins):
@@ -502,10 +502,10 @@ def search(engine, q: str, limit: int = 40) -> list[dict]:
     digits = re.sub(r"\D", "", q)
     like = f"%{q.lower()}%"
     if len(digits) >= 4:
-        rows = engine.store.q("SELECT * FROM leads WHERE phone LIKE ? OR phone_raw LIKE ? ORDER BY id DESC LIMIT ?",
+        rows = engine.store.q("SELECT * FROM leads WHERE source<>'test' AND (phone LIKE ? OR phone_raw LIKE ?) ORDER BY id DESC LIMIT ?",
                               (f"%{digits}%", f"%{digits}%", limit))
     else:
-        rows = engine.store.q("SELECT * FROM leads WHERE LOWER(name) LIKE ? OR LOWER(student_name) LIKE ? "
+        rows = engine.store.q("SELECT * FROM leads WHERE source<>'test' AND (LOWER(name) LIKE ? OR LOWER(student_name) LIKE ?) "
                               "ORDER BY id DESC LIMIT ?", (like, like, limit))
     tz = engine.cfg.tz
     return [{"id": r["id"], "when": parse(r["created_at"]).astimezone(tz).strftime("%d %b %H:%M"),

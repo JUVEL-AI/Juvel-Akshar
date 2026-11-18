@@ -13,15 +13,18 @@ def mask(phone: str | None) -> str:
     return f"{phone[:3]} {phone[3:5]}••• ••{phone[-3:]}"
 
 
-def build(engine, now: datetime, day: str | None = None) -> dict:
+def build(engine, now: datetime, day: str | None = None, test: bool = False) -> dict:
     cfg, store = engine.cfg, engine.store
     local_now = now.astimezone(cfg.tz)
     day_start = (datetime.fromisoformat(day).replace(tzinfo=cfg.tz) if day
                  else local_now.replace(hour=0, minute=0, second=0, microsecond=0))
     day_end = day_start + timedelta(days=1)
     from .store import iso
-    rows = store.q("SELECT * FROM leads WHERE created_at>=? AND created_at<? ORDER BY created_at DESC",
-                   (iso(day_start), iso(day_end)))
+    if test:                          # the Test lab: only test enquiries, newest 30, any day
+        rows = store.q("SELECT * FROM leads WHERE source='test' ORDER BY id DESC LIMIT 30")
+    else:                             # everything real; test enquiries never appear here
+        rows = store.q("SELECT * FROM leads WHERE created_at>=? AND created_at<? AND source<>'test' ORDER BY created_at DESC",
+                       (iso(day_start), iso(day_end)))
     calls = {}
     for c in store.q("SELECT lead_id, MIN(started_at) first_at, MAX(attempt) n FROM calls GROUP BY lead_id"):
         calls[c["lead_id"]] = c

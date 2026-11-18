@@ -894,3 +894,39 @@ def test_school_presets_offered_and_valid():
     from juvelcall import sheets_admin
     out = sheets_admin.validate(e, {"sheets": [{**p, "spreadsheet": p["spreadsheet_id"]} for p in v["presets"]], "default_campus": "ecr", "date_order": "mdy"})
     assert len(out["sheets"]) == 4
+
+
+# ---- test lab
+def test_test_lab_is_isolated_from_real_data():
+    e, s, d, n = mk()
+    e.ingest([lead("real1", phone="9876543210")], MON_10AM)
+    lid, why = e.create_test_lead(MON_10AM, "Tester", "Kid", "grade-3", "9000000001", "ecr", "9000000002", "juvel")
+    assert why == "" and lid
+    plan = d.calls[-1]
+    assert plan.parent_number == "+919000000001" and plan.counselor_numbers == ["+919000000002"] and plan.counselor_name == "Test Counselor"
+    # never in real lists, counts, reports or search
+    import juvelcall.console as console, juvelcall.ops as ops
+    assert all(l["parent"] != "Tester" for l in console.build(e, MON_10AM)["leads"])
+    assert "Tester" in [l["parent"] for l in console.build(e, MON_10AM, test=True)["leads"]]
+    assert sum(e.report().values()) == 1
+    assert ops.search(e, "Tester") == [] and ops.search(e, "9000000001") == []
+    # no emails to the school for a test, even on transfer
+    before = len(n.sent)
+    e.handle_event(CallEvent(plan.call_ref, EventKind.TRANSFERRED, transferred_to="+919000000002"), MON_10AM)
+    assert len(n.sent) == before
+    assert e.delete_test_data(MON_10AM, "juvel") == 1 and s.one("SELECT 1 FROM leads WHERE source='test'") is None
+    assert s.one("SELECT 1 FROM leads WHERE source<>'test'") is not None      # real data untouched
+
+
+def test_test_lab_validation_and_api():
+    e, s, d, n = mk()
+    assert e.create_test_lead(MON_10AM, "T", "", "", "9000000001", "ecr", "9000000001", "x")[1].startswith("Use two different")
+    assert e.create_test_lead(MON_10AM, "T", "", "", "abc", "ecr", "9000000002", "x")[0] is None
+    assert e.create_test_lead(MON_10AM, "T", "", "", "9000000001", "nowhere", "9000000002", "x")[1] == "Choose a campus"
+    client = TestClient(create_app(e, clock=lambda: MON_10AM))
+    h = {"X-Webhook-Secret": cfg.security["webhook_secret"]}
+    r = client.post("/api/test/lead", json={"name": "A", "parent_phone": "9000000001", "counselor_phone": "9000000002", "campus": "ecr", "grade": "LKG"}, headers=h)
+    assert r.status_code == 200
+    assert len(client.get("/api/test", headers=h).json()["leads"]) == 1
+    assert client.delete("/api/test", headers=h).json()["deleted"] == 1
+    assert client.get("/api/test").status_code == 401

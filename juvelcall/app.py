@@ -247,6 +247,27 @@ def create_app(engine: Engine, clock=now_utc, run_loop: bool = False, loop_secon
         engine.store.add_audit(clock(), by[:40], "export", day or "today")
         return Response(ops.export_csv(engine, day, clock()), media_type="text/csv; charset=utf-8")
 
+    @app.get("/api/test")
+    def api_test(x_webhook_secret: str | None = Header(default=None)):
+        auth(x_webhook_secret)
+        return console.build(engine, clock(), None, test=True)
+
+    @app.post("/api/test/lead")
+    def api_test_lead(payload: dict, x_webhook_secret: str | None = Header(default=None)):
+        auth(x_webhook_secret)
+        ops.apply_overrides(engine)
+        lid, why = engine.create_test_lead(clock(), str(payload.get("name", ""))[:60], str(payload.get("student", ""))[:60],
+                                           str(payload.get("grade", ""))[:30], str(payload.get("parent_phone", "")),
+                                           str(payload.get("campus", "")), str(payload.get("counselor_phone", "")), str(payload.get("by", ""))[:40])
+        if lid is None or why:
+            raise HTTPException(409, why or "Could not create the test")
+        return {"ok": True, "id": lid}
+
+    @app.delete("/api/test")
+    def api_test_clear(by: str = "", x_webhook_secret: str | None = Header(default=None)):
+        auth(x_webhook_secret)
+        return {"ok": True, "deleted": engine.delete_test_data(clock(), by[:40])}
+
     @app.get("/api/lead/{lead_id}")
     def api_lead(lead_id: int, x_webhook_secret: str | None = Header(default=None)):
         auth(x_webhook_secret)
@@ -312,7 +333,7 @@ def create_app(engine: Engine, clock=now_utc, run_loop: bool = False, loop_secon
         auth(x_webhook_secret)
         rows = engine.store.q(
             "SELECT id,created_at,name,student_name,phone,campus,grade,status,attempts,last_outcome,transferred_to,note "
-            "FROM leads ORDER BY id DESC LIMIT 200")
+            "FROM leads WHERE source<>'test' ORDER BY id DESC LIMIT 200")
         return {"summary": engine.report(), "leads": [dict(r) for r in rows]}
 
     return app

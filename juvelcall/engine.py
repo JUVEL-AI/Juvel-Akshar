@@ -182,6 +182,9 @@ class Engine:
     def build_plan(self, r) -> CallPlan:
         campus = self.cfg.campuses[r["campus"]]
         counselor = self._on_duty(r["campus"]) or campus["counselors"][0]
+        test_num = self.store.kv_get(f"testnum_{r['id']}") if r["source"] == "test" else None
+        if test_num:                      # Test lab: ring the tester's own phone, never a real counselor
+            counselor = {**counselor, "name": "Test Counselor", "numbers": [test_num]}
         m = self.cfg.messages
         ctx = dict(school_name=m["school_name"], counselor_name=counselor["name"],
                    campus_label=campus["label"], student_name=r["student_name"], grade=r["grade"],
@@ -198,7 +201,7 @@ class Engine:
             call_ref=f"c-{uuid.uuid4().hex[:12]}", lead_id=r["id"], campus=r["campus"],
             parent_number=r["phone"], caller_id=campus["caller_id"],
             greeting_text=m["greeting"].format(**ctx), counselor_name=counselor["name"],
-            counselor_numbers=list(counselor["numbers"]) + list(campus.get("backup_numbers", [])),
+            counselor_numbers=list(counselor["numbers"]) + ([] if test_num else list(campus.get("backup_numbers", []))),
             counselor_ring_seconds=campus.get("counselor_ring_seconds", 25),
             whisper_text=whisper, fallback_text=m["fallback"].format(**ctx),
             max_call_seconds=self.c["max_call_seconds"], webhook_url=self.webhook_url)
@@ -315,6 +318,10 @@ class Engine:
 
     def _alert(self, now, kind, lead_id, subject, body, to=None):
         aid = self.store.add_alert(now, kind, lead_id, subject, body)
+        if lead_id:
+            src = self.store.one("SELECT source FROM leads WHERE id=?", (lead_id,))
+            if src and src["source"] == "test":
+                return                    # test enquiries never email the school's officers
         if not to and lead_id:
             row = self.store.one("SELECT campus FROM leads WHERE id=?", (lead_id,))
             camp = self.cfg.campuses.get(row["campus"]) if row and row["campus"] else None
@@ -354,6 +361,41 @@ class Engine:
         self._erase_lead(lead_id)
         self.store.add_audit(now, who, "delete_lead", f"lead {lead_id}")
         return ""
+
+    # ---------- test lab (super admin) ----------
+    def create_test_lead(self, now: datetime, name: str, student: str, grade: str, parent_phone: str,
+                         campus: str, counselor_phone: str, who: str = "") -> tuple[int | None, str]:
+        """A sandbox enquiry: rings parent_phone (the tester's own phone) and transfers to counselor_phone (a second phone
+        of the tester). Never rings real parents or counselors, never emails the school, never shows in reports."""
+        p, c = clean_phone(parent_phone), clean_phone(counselor_phone)
+        if not p:
+            return None, "The 'parent' phone is not a valid number"
+        if not c:
+            return None, "The 'counselor' phone is not a valid number"
+        if p == c:
+            return None, "Use two different phones: one plays the parent, the other plays the counselor"
+        if campus not in self.cfg.campuses:
+            return None, "Choose a campus"
+        lead_id = self.store.insert(
+            """INSERT INTO leads(source,key,row_ref,created_at,received_at,name,student_name,phone,phone_raw,
+               campus,campus_raw,grade,grade_raw,email,city,status,attempts,next_attempt_at,note,raw,updated_at)
+               VALUES('test',?,?,?,?,?,?,?,?,?,?,?,?,'','',?,0,?,?,?,?)""",
+            (uuid.uuid4().hex[:16], "test", iso(now), iso(now), clean_name(name) or "Test Parent", clean_name(student),
+             p, parent_phone, campus, campus, clean_grade(grade) or grade.strip()[:20], grade, Status.QUEUED.value, iso(now),
+             f"test call by {who or 'super admin'}", "{}", iso(now)))
+        self.store.kv_set(f"testnum_{lead_id}", c)
+        self.store.add_audit(now, who, "test_call", f"test lead {lead_id}")
+        why = self.call_now(lead_id, now, who or "super admin")
+        return lead_id, why
+
+    def delete_test_data(self, now: datetime, who: str = "") -> int:
+        n = 0
+        for r in self.store.q("SELECT id FROM leads WHERE source='test'"):      # even one still 'calling': it is only a test
+            self._erase_lead(r["id"])
+            self.store.x("DELETE FROM kv WHERE k=?", (f"testnum_{r['id']}",))
+            n += 1
+        self.store.add_audit(now, who, "test_clear", f"{n} test enquiries")
+        return n
 
     def _erase_lead(self, lead_id: int) -> None:
         """Remove a lead, its calls and alerts, and ask the calling provider to erase its recordings/transcripts too."""
@@ -398,5 +440,5 @@ class Engine:
         return True
 
     def report(self) -> dict:
-        rows = self.store.q("SELECT status, COUNT(*) n FROM leads GROUP BY status")
+        rows = self.store.q("SELECT status, COUNT(*) n FROM leads WHERE source<>'test' GROUP BY status")
         return {r["status"]: r["n"] for r in rows}
