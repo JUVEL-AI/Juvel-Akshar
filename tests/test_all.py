@@ -976,3 +976,32 @@ def test_start_from_change_revives_skipped_rows_and_validation():
 def test_staff_can_start_pause_stop_through_dashboard_route_source():
     src = open("web/app/api/control/route.ts").read()
     assert "needAdmin" not in src and "whoFromReq" in src
+
+
+# ---- one Vobiz number per campus
+def test_each_campus_calls_from_its_own_vapi_number():
+    from juvelcall.dialers import VapiDialer, DialerError
+    from juvelcall import ops
+    e, s, d, n = mk()
+    d2 = VapiDialer("k" * 12, "default-id-1", phone_number_ids={"ecr": "ecr-id-111", "t_nagar": "tng-id-222"})
+    e.ingest([lead("a", phone="9876543201", campus="ecr_campus"), lead("b", phone="9876543202", campus="t_nagar_campus")], MON_10AM)
+    rows = {r["campus"]: r for r in s.q("SELECT * FROM leads")}
+    assert d2.build_payload(e.build_plan(rows["ecr"]))["phoneNumberId"] == "ecr-id-111"
+    assert d2.build_payload(e.build_plan(rows["t_nagar"]))["phoneNumberId"] == "tng-id-222"
+    d3 = VapiDialer("k" * 12, "", phone_number_ids={"ecr": "ecr-id-111"})
+    with pytest.raises(DialerError):
+        d3.build_payload(e.build_plan(rows["t_nagar"]))               # a campus with no number never silently uses the wrong one
+    assert VapiDialer("k" * 12, "only-id-1").build_payload(e.build_plan(rows["t_nagar"]))["phoneNumberId"] == "only-id-1"
+
+
+def test_per_campus_numbers_save_and_apply():
+    from juvelcall import ops
+    e, s, d, n = mk()
+    v = ops.save_integrations(e, {"vapi_api_key": "k" * 12, "vapi_phone_id_ecr": "ecr-id-111", "vapi_phone_id_t_nagar": "tng-id-222",
+                                  "caller_id_ecr": "+918064264030", "caller_id_t_nagar": "+918064264099"}, MON_10AM, "juvel")
+    assert v["live"] and v["vapi_phone_id_t_nagar"]["value"] == "tng-id-222"
+    assert e.cfg.dialer["vapi"]["phone_number_ids"] == {"ecr": "ecr-id-111", "t_nagar": "tng-id-222"}
+    assert e.cfg.campuses["t_nagar"]["caller_id"] == "+918064264099" and e.cfg.campuses["ecr"]["caller_id"] == "+918064264030"
+    assert e.dialer.phone_number_ids["t_nagar"] == "tng-id-222"
+    with pytest.raises(ValueError):
+        ops.save_integrations(e, {"caller_id_t_nagar": "+917305972752"}, MON_10AM, "juvel")      # a counselor's own number

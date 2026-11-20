@@ -4,14 +4,18 @@ import type { IntegData } from "@/lib/backend";
 
 const FIELDS: { k: keyof Omit<IntegData, "live">; label: string; secret?: boolean; hint: string; ph: string }[] = [
   { k: "vapi_api_key", label: "Vapi private API key", secret: true, ph: "paste the private key", hint: "Vapi dashboard > API Keys > Private Key. Never the public key." },
-  { k: "vapi_phone_number_id", label: "Vapi phone number ID", ph: "e.g. 8f3c…", hint: "Vapi dashboard > Phone Numbers > click your Vobiz number > copy its ID." },
+  { k: "vapi_phone_id_ecr", label: "ECR: Vapi phone number ID", ph: "e.g. 8f3c…", hint: "The Vobiz number for the ECR campus. Vapi dashboard > Phone Numbers > click it > copy its ID. ECR parents are called from this number." },
+  { k: "caller_id_ecr", label: "ECR: calling number", ph: "+91…", hint: "The same Vobiz number in +91 form (for checks only; parents see the number set inside Vapi)." },
+  { k: "vapi_phone_id_t_nagar", label: "T Nagar: Vapi phone number ID", ph: "e.g. 2b9d…", hint: "The Vobiz number for the T Nagar campus, imported in Vapi as its own phone number. T Nagar parents are called from this number." },
+  { k: "caller_id_t_nagar", label: "T Nagar: calling number", ph: "+91…", hint: "The same Vobiz number in +91 form." },
+  { k: "vapi_phone_number_id", label: "Fallback Vapi phone number ID (optional)", ph: "e.g. 8f3c…", hint: "Used for any campus that has no number of its own above. Leave it if both campuses have theirs." },
   { k: "vapi_server_secret", label: "Vapi webhook secret", secret: true, ph: "a long random value", hint: "Any long random value. Put the same value in Vapi as the x-vapi-secret header for the server URL." },
   { k: "vapi_voice_id", label: "Voice (ElevenLabs voice ID)", ph: "e.g. a voice ID from ElevenLabs", hint: "Pick a female Indian-English voice in ElevenLabs, copy its Voice ID. In Vapi, add your ElevenLabs key under Providers first. Empty = Vapi's default voice." },
   { k: "vapi_voice_speed", label: "Voice speed", ph: "0.9", hint: "0.7 is slower, 1.0 is normal, 1.2 is faster. If the voice rushes, try 0.85. Applies when an ElevenLabs voice is set above." },
   { k: "vapi_hold_audio_url", label: "Hold music link", ph: "https://juvel-akshar-dashboard.vercel.app/audio/hold.mp3", hint: "Soft music the parent hears while the counselor is called. Needs Transfer style = assistant. The file must open without a login." },
   { k: "vapi_transfer_style", label: "Transfer style", ph: "blind", hint: "blind = connects the parent with no message (tested, working). assistant = tells the counselor the parent's name and class before connecting (test it first)." },
   { k: "google_service_account", label: "Google service account key", secret: true, ph: "paste the whole JSON file", hint: "Lets the system read the school's lead sheets. Create it in Google Cloud (Service accounts, Keys, JSON), then share each sheet with its email address as a Viewer. Pick the sheets on the Lead sheets page." },
-  { k: "caller_id", label: "Calling number (Vobiz)", ph: "+914440001111", hint: "The Vobiz number parents see. It must not be a counselor's own number." },
+  { k: "caller_id", label: "General calling number (optional)", ph: "+914440001111", hint: "Used for checks when a campus has no number of its own. It must not be a counselor's own number." },
 ];
 
 export default function IntegrationsForm({ initial }: { initial: IntegData | null }) {

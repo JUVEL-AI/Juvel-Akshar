@@ -71,14 +71,20 @@ def apply_overrides(engine) -> None:
     if integ.get("caller_id"):
         for c in campuses.values():
             c["caller_id"] = integ["caller_id"]
-    if integ.get("vapi_api_key") or integ.get("vapi_phone_number_id") or integ.get("vapi_server_secret"):
+    for ck, c in campuses.items():                    # one calling number per campus (overrides the general one)
+        if integ.get(f"caller_id_{ck}"):
+            c["caller_id"] = integ[f"caller_id_{ck}"]
+    per_campus = {ck: integ[f"vapi_phone_id_{ck}"] for ck in campuses if integ.get(f"vapi_phone_id_{ck}")}
+    if per_campus:
+        v = dict(dialer.get("vapi") or {}); v["phone_number_ids"] = per_campus; dialer["vapi"] = v
+    if integ.get("vapi_api_key") or integ.get("vapi_phone_number_id") or integ.get("vapi_server_secret") or per_campus:
         v = dict(dialer.get("vapi") or {})
         for k_in, k_out in (("vapi_api_key", "api_key"), ("vapi_phone_number_id", "phone_number_id"),
                             ("vapi_server_secret", "server_secret")):
             if integ.get(k_in):
                 v[k_out] = integ[k_in]
         dialer["vapi"] = v
-        if v.get("api_key") and v.get("phone_number_id"):
+        if v.get("api_key") and (v.get("phone_number_id") or v.get("phone_number_ids")):
             dialer["type"] = "vapi"
     try:
         sm = json.loads(engine.store.kv_get("sheets") or "{}")
@@ -98,7 +104,7 @@ def apply_overrides(engine) -> None:
 
 # ---------------- integrations (Vapi / Vobiz), admin only ----------------
 SECRET_KEYS = ("vapi_api_key", "vapi_server_secret", "google_service_account")
-INTEG_KEYS = ("vapi_api_key", "vapi_phone_number_id", "vapi_server_secret", "caller_id", "vapi_voice_id", "vapi_transfer_style", "google_service_account", "vapi_voice_speed", "vapi_hold_audio_url")
+INTEG_KEYS = ("vapi_api_key", "vapi_phone_number_id", "vapi_phone_id_ecr", "vapi_phone_id_t_nagar", "caller_id_ecr", "caller_id_t_nagar", "vapi_server_secret", "caller_id", "vapi_voice_id", "vapi_transfer_style", "google_service_account", "vapi_voice_speed", "vapi_hold_audio_url")
 
 
 def _integrations(engine) -> dict:
@@ -117,7 +123,11 @@ def integrations_view(engine) -> dict:
     cfg, st = engine.cfg, _integrations(engine)
     v = cfg.dialer.get("vapi") or {}
     caller = next((c.get("caller_id", "") for c in cfg.campuses.values()), "")
+    ids = v.get("phone_number_ids") or {}
     eff = {"vapi_api_key": v.get("api_key", ""), "vapi_phone_number_id": v.get("phone_number_id", ""),
+           "vapi_phone_id_ecr": ids.get("ecr", ""), "vapi_phone_id_t_nagar": ids.get("t_nagar", ""),
+           "caller_id_ecr": (cfg.campuses.get("ecr") or {}).get("caller_id", ""),
+           "caller_id_t_nagar": (cfg.campuses.get("t_nagar") or {}).get("caller_id", ""),
            "vapi_server_secret": v.get("server_secret", ""), "caller_id": caller,
            "vapi_voice_id": v.get("voice_id", ""), "vapi_transfer_style": v.get("transfer_style", "blind"),
            "vapi_voice_speed": str(v.get("voice_speed", "0.9")), "vapi_hold_audio_url": v.get("hold_audio_url", "")}
@@ -130,7 +140,7 @@ def integrations_view(engine) -> dict:
     g = google_json(engine)
     out["google_service_account"] = {"set": bool(g), "value": service_email(g) or ("•" * 8 if g else ""),
                                      "from": "dashboard" if st.get("google_service_account") else ("server settings" if g else "")}
-    out["live"] = bool(eff["vapi_api_key"] and eff["vapi_phone_number_id"] and cfg.dialer.get("type") == "vapi")
+    out["live"] = bool(eff["vapi_api_key"] and (eff["vapi_phone_number_id"] or ids) and cfg.dialer.get("type") == "vapi")
     return out
 
 
@@ -142,7 +152,7 @@ def save_integrations(engine, payload: dict, now: datetime, who: str) -> dict:
         val = str(payload.get(k, "") or "").strip()
         if not val:
             continue
-        if k == "caller_id":
+        if k == "caller_id" or k.startswith("caller_id_"):
             n = clean_phone(val)
             if not n:
                 raise ValueError("Calling number: that is not a valid phone number")
@@ -185,24 +195,29 @@ def save_integrations(engine, payload: dict, now: datetime, who: str) -> dict:
 
 
 def test_vapi(engine) -> dict:
-    """Asks Vapi whether the saved key can see the saved phone number. Places no call."""
+    """Asks Vapi whether the saved key can see each saved phone number (the general one and one per campus). Places no call."""
     import requests
     v = engine.cfg.dialer.get("vapi") or {}
-    if not (v.get("api_key") and v.get("phone_number_id")):
-        return {"ok": False, "message": "Save the Vapi key and the phone number ID first."}
-    try:
-        r = requests.get(f"https://api.vapi.ai/phone-number/{v['phone_number_id']}",
-                         headers={"Authorization": f"Bearer {v['api_key']}"}, timeout=10)
-    except Exception as e:
-        return {"ok": False, "message": f"Could not reach Vapi: {e}"}
-    if r.status_code == 401:
-        return {"ok": False, "message": "Vapi rejected the API key. Use the private key from Vapi > API Keys."}
-    if r.status_code == 404:
-        return {"ok": False, "message": "Vapi does not know that phone number ID under this key."}
-    if r.status_code >= 400:
-        return {"ok": False, "message": f"Vapi answered {r.status_code}."}
-    j = r.json() if r.content else {}
-    return {"ok": True, "message": "Vapi accepted the key and found the number " + str(j.get("number") or j.get("name") or "") + "."}
+    ids = {"general": v.get("phone_number_id", ""), **{f"{ck} campus": pid for ck, pid in (v.get("phone_number_ids") or {}).items()}}
+    ids = {k: i for k, i in ids.items() if i}
+    if not (v.get("api_key") and ids):
+        return {"ok": False, "message": "Save the Vapi key and at least one phone number ID first."}
+    lines, ok = [], True
+    for label, pid in ids.items():
+        try:
+            r = requests.get(f"https://api.vapi.ai/phone-number/{pid}", headers={"Authorization": f"Bearer {v['api_key']}"}, timeout=10)
+        except Exception as e:
+            return {"ok": False, "message": f"Could not reach Vapi: {e}"}
+        if r.status_code == 401:
+            return {"ok": False, "message": "Vapi rejected the API key. Use the private key from Vapi > API Keys."}
+        if r.status_code == 404:
+            ok = False; lines.append(f"{label}: Vapi does not know that phone number ID under this key.")
+        elif r.status_code >= 400:
+            ok = False; lines.append(f"{label}: Vapi answered {r.status_code}.")
+        else:
+            j = r.json() if r.content else {}
+            lines.append(f"{label}: found {j.get('number') or j.get('name') or 'the number'}.")
+    return {"ok": ok, "message": " ".join(lines)}
 
 
 def hours_map(calling: dict) -> dict:

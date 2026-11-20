@@ -25,8 +25,9 @@ class VapiDialer(Dialer):
     def __init__(self, api_key: str, phone_number_id: str, server_secret: str = "",
                  timeout_seconds: int = 15, transfer_style: str = "blind",
                  immediate_transfer: bool = True, sip_verb: str = "dial",
-                 voice_id: str = "", voice_provider: str = "11labs", voice_model: str = "eleven_turbo_v2_5", voice_speed: float = 0.9, hold_audio_url: str = "", **_):
+                 voice_id: str = "", voice_provider: str = "11labs", voice_model: str = "eleven_turbo_v2_5", voice_speed: float = 0.9, hold_audio_url: str = "", phone_number_ids: dict | None = None, **_):
         self.api_key, self.phone_number_id = api_key, phone_number_id
+        self.phone_number_ids = {k: str(v) for k, v in (phone_number_ids or {}).items() if v}   # campus -> Vapi number (one Vobiz number per campus)
         self.server_secret, self.timeout = server_secret, timeout_seconds
         self.transfer_style = transfer_style or "blind"      # blind (proven on the Vobiz trunk) | assistant (adds a whisper) | legacy
         self.immediate = bool(immediate_transfer)
@@ -103,7 +104,10 @@ class VapiDialer(Dialer):
         if p.webhook_url:
             assistant["server"] = {"url": p.webhook_url, "secret": self.server_secret} if self.server_secret \
                 else {"url": p.webhook_url}
-        return {"phoneNumberId": self.phone_number_id, "customer": {"number": p.parent_number},
+        pid = self.phone_number_ids.get(p.campus) or self.phone_number_id
+        if not pid:
+            raise DialerError(f"vapi: no phone number is set for the {p.campus} campus. Add its Vapi phone number ID on the Connections page")
+        return {"phoneNumberId": pid, "customer": {"number": p.parent_number},
                 "metadata": {"call_ref": p.call_ref, "lead_id": p.lead_id}, "assistant": assistant}
 
     def _post(self, payload: dict):
