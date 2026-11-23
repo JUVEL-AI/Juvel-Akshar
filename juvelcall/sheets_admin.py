@@ -68,7 +68,7 @@ def suggest_columns(headers: list[str]) -> dict:
     out = {
         "phone": pick(lambda n: any(w in n for w in ("phone", "mobile", "whatsapp", "contact number", "contact no", "contactno"))),
         "campus": pick(lambda n: "campus" in n or "branch" in n),
-        "grade": pick(lambda n: any(w in n for w in ("admission", "applying", "sought")) and any(w in n for w in ("grade", "class")), avoid=("school",))
+        "grade": pick(lambda n: any(w in n for w in ("admission", "applying", "sought")) and any(w in n for w in ("grade", "class", "sought")), avoid=("school",))
         or pick(lambda n: any(w in n for w in ("grade", "class", "standard", "std")), avoid=("school", "campaign")),
         "grade_alt": "",
         "email": pick(lambda n: "email" in n or "e mail" in n),

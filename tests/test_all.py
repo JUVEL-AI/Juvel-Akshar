@@ -892,10 +892,10 @@ def test_google_ads_and_website_tabs_suggestions():
 def test_school_presets_offered_and_valid():
     e, *_ = mk()
     v = __import__("juvelcall.sheets_admin", fromlist=["view"]).view(e)
-    assert len(v["presets"]) == 4 and sum(1 for p in v["presets"] if p["enabled"]) == 3
+    assert len(v["presets"]) == 5 and sum(1 for p in v["presets"] if p["enabled"]) == 3
     from juvelcall import sheets_admin
     out = sheets_admin.validate(e, {"sheets": [{**p, "spreadsheet": p["spreadsheet_id"]} for p in v["presets"]], "default_campus": "ecr", "date_order": "mdy"})
-    assert len(out["sheets"]) == 4
+    assert len(out["sheets"]) == 5
 
 
 # ---- test lab
@@ -957,7 +957,7 @@ def test_start_from_date_calls_newer_rows_even_if_old_and_paces_them():
     assert s.one("SELECT status FROM leads WHERE key='old'")["status"] == "STALE"
     assert s.one("SELECT COUNT(*) n FROM leads WHERE status='QUEUED' AND allow_old=1")["n"] == 5
     placed = e.tick(MON_10AM)
-    assert len(placed) == 3                                   # paced: backfill_per_minute
+    assert len(placed) == 2                                   # paced: backfill_per_minute
     assert len(e.tick(MON_10AM + timedelta(minutes=1))) == 2
 
 
@@ -1005,3 +1005,15 @@ def test_per_campus_numbers_save_and_apply():
     assert e.dialer.phone_number_ids["t_nagar"] == "tng-id-222"
     with pytest.raises(ValueError):
         ops.save_integrations(e, {"caller_id_t_nagar": "+917305972752"}, MON_10AM, "juvel")      # a counselor's own number
+
+
+def test_website_form_formats():
+    from datetime import timezone
+    from juvelcall.sources.csv_source import parse_time
+    from juvelcall.normalize import clean_grade
+    t = parse_time("November 17, 2026", timezone.utc)
+    assert (t.year, t.month, t.day) == (2026, 11, 17)
+    assert parse_time("2026-10-05 9:05:03", timezone.utc).hour == 9
+    assert clean_grade("E2") == "ELC 2"
+    assert clean_grade("TD") == "Toddler"
+    assert clean_grade("G6") == "6th grade"

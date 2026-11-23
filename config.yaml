@@ -18,7 +18,7 @@ calling:
   first_call_within_minutes: 5
   retry_minutes: [15, 60, 240]             # delay before attempt 2, 3, 4
   max_attempts: 4
-  backfill_per_minute: 3                   # catch-up from a chosen start date: at most this many older enquiries are called per minute
+  backfill_per_minute: 2                   # catch-up from a chosen start date: at most this many older enquiries are called per minute
   stale_after_hours: 48                    # older leads are not auto-called
   dedupe_window_hours: 72                  # same phone inside this window = duplicate
   alert_if_not_called_after_minutes: 10    # inquiry arrived, no call placed
@@ -119,10 +119,16 @@ sources:
       worksheet: "Google Ads"
       enabled: true
       columns: {created_at: "Timestamp", name: "Parent Name", student_name: "Student Name", phone: "Phone", campus: "Branch", grade: "Class"}
-    - label: "Website registrations"
+    - label: "Website registrations (school form)"
+      spreadsheet_id: "1hqnfahxY-agKd8NiJ4l3lpz8Q4W3DzRjUYQdhJO0iLY"
+      worksheet: "2023-26"
+      enabled: true
+      start_from: "2026-08-01"             # the school's cut-off date for this form
+      columns: {created_at: "date", name: "fname", student_name: "namechild", phone: "fcontactno", campus: "preferred-campus", grade: "admission-sought", email: "femail"}
+    - label: "Website form, new (SM Lead tab, stopped June 2026)"
       spreadsheet_id: "1hqnfahxY-agKd8NiJ4l3lpz8Q4W3DzRjUYQdhJO0iLY"
       worksheet: "SM Lead"
-      enabled: true
+      enabled: false
       columns: {created_at: "Timestamp", name: "Father Name", student_name: "Child Name", phone: "Contact No", campus: "Campus Preference", grade: "Admission Class", email: "Email"}
     - label: "Old Meta leads (stopped May 2026)"
       spreadsheet_id: "1hqnfahxY-agKd8NiJ4l3lpz8Q4W3DzRjUYQdhJO0iLY"

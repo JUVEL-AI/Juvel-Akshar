@@ -64,9 +64,15 @@ def clean_grade(raw: str) -> str:
     for k, v in _GRADE_WORDS.items():
         if re.fullmatch(rf"(class |grade |std )?{re.escape(k)}", t):
             return v
-    m = re.fullmatch(r"elc ?(\d)", t)                 # early learning centre: 'elc-1'
+    m = re.fullmatch(r"(?:elc ?|e)(\d)", t)           # early learning: 'elc-1' or the website form's code 'E1'
     if m:
         return f"ELC {m.group(1)}"
+    if t == "td":                                     # website form code for toddler
+        return "Toddler"
+    m = re.fullmatch(r"g ?(\d{1,2})", t)              # website form code 'G6' = grade 6
+    if m and 1 <= int(m.group(1)) <= 12:
+        n = int(m.group(1))
+        return f"{_ORD.get(n, str(n) + 'th')} grade" if n not in (11, 12) else f"{n}th grade"
     m = re.fullmatch(r"(?:class|grade|std|standard)?\s*(\d{1,2})(?:st|nd|rd|th)?(?:\s*(?:std|standard|grade|class))?", t)
     if m:
         n = int(m.group(1))

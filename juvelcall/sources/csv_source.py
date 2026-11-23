@@ -8,6 +8,8 @@ from ..models import RawLead
 from ..normalize import clean_grade
 
 
+_MONTH_NAME = re.compile(r"^([A-Za-z]{3,9}) (\d{1,2}), (\d{4})(?:[ T]+(\d{1,2}):(\d{2}))?$")
+_ISO_LOOSE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?$")
 _SLASH = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{4})[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?$")
 LONG_AGO = datetime(2000, 1, 1, tzinfo=timezone.utc)
 
@@ -17,6 +19,17 @@ def parse_time(s: str, tz: ZoneInfo, date_order: str = "mdy") -> datetime:
     date_order says how a slash date reads ('mdy' like this school's sheet, or 'dmy'); a first number above 12
     is always a day. Raises ValueError when the text is not a time at all."""
     s = (s or "").strip()
+    m = _MONTH_NAME.match(s)                        # 'November 17, 2026' (the school's website form; no time of day)
+    if m:
+        for fmt in ("%B %d, %Y", "%b %d, %Y"):
+            try:
+                d = datetime.strptime(f"{m[1]} {m[2]}, {m[3]}", fmt)
+                return d.replace(hour=int(m[4] or 0), minute=int(m[5] or 0), tzinfo=tz)
+            except ValueError:
+                continue
+    m = _ISO_LOOSE.match(s)                         # '2026-10-05 9:05:03' (single-digit hour)
+    if m:
+        return datetime(int(m[1]), int(m[2]), int(m[3]), int(m[4]), int(m[5]), int(m[6] or 0), tzinfo=tz)
     m = _SLASH.match(s)
     if m:
         a, b, y, hh, mm, ss = int(m[1]), int(m[2]), int(m[3]), int(m[4]), int(m[5]), int(m[6] or 0)
