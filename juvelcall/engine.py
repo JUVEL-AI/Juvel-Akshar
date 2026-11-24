@@ -88,26 +88,48 @@ class Engine:
         so nobody who enquired before go-live is called or emailed about."""
         ops.apply_overrides(self)
         out = {"new": 0, "skipped_existing": 0}
+        existing: set = set()                       # one query per source instead of one per row (sheets hold thousands of rows)
+        for src in {l.source for l in leads}:
+            existing |= {(src, r["key"]) for r in self.store.q("SELECT key FROM leads WHERE source=?", (src,))}
+        bulk = []
         for lead in sorted(leads, key=lambda l: l.created_at):
-            if self.store.one("SELECT 1 FROM leads WHERE source=? AND key=?", (lead.source, lead.key)):
+            if (lead.source, lead.key) in existing:
                 out["skipped_existing"] += 1
                 continue
-            self._ingest_one(lead, now, baseline, since)
+            existing.add((lead.source, lead.key))
+            if baseline:                            # first read: everything already there is stored silently, in bulk
+                bulk.append(self._insert_args(lead, now, Status.STALE, "already in the sheet before go-live", None))
+            else:
+                self._ingest_one(lead, now, baseline, since)
             out["new"] += 1
+        self.store.insert_many(self.INSERT_LEAD, bulk)
         return out
 
-    def _ingest_one(self, lead: RawLead, now: datetime, baseline: bool = False, since: datetime | None = None) -> int:
+    INSERT_LEAD = """INSERT INTO leads(source,key,row_ref,created_at,received_at,name,student_name,phone,phone_raw,
+               campus,campus_raw,grade,grade_raw,email,city,status,attempts,next_attempt_at,note,raw,updated_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?)"""
+
+    def _normalise(self, lead: RawLead):
         phone = clean_phone(lead.phone)
         campus = canonical_campus(lead.campus)
         grade = clean_grade(lead.grade_text)
         if not campus:
-            # This school's Meta form sometimes puts a class level ('grade-9', 'elc-1') or 'either' in the campus column.
             grade = grade or clean_grade(lead.campus)
             raw = (lead.campus or "").strip().lower()
             gradelike = bool(clean_grade(lead.campus))
             open_answer = (not raw) or gradelike or any(w in raw for w in ("either", "any", "both", "no preference", "not sure", "none", "n/a"))
-            # only an open answer ('either', blank, a class level) takes the default; an unreadable campus still needs a person
             campus = (self.cfg.sources.get("default_campus") or None) if open_answer else None
+        return phone, campus, grade
+
+    def _insert_args(self, lead: RawLead, now: datetime, status: Status, note: str, next_at) -> tuple:
+        phone, campus, grade = self._normalise(lead)
+        return (lead.source, lead.key, lead.row_ref, iso(lead.created_at), iso(now), clean_name(lead.name),
+                clean_name(lead.student_name), phone, lead.phone, campus, lead.campus, grade, lead.grade_text,
+                lead.email, lead.city, status.value, iso(next_at) if next_at else None, note,
+                self.store.dump_raw(lead.raw), iso(now))
+
+    def _ingest_one(self, lead: RawLead, now: datetime, baseline: bool = False, since: datetime | None = None) -> int:
+        phone, campus, grade = self._normalise(lead)
         status, note, next_at = Status.QUEUED, "", None
 
         # 'start from date' (set per sheet on the dashboard): older rows stay silent, newer ones are called even if they
@@ -132,14 +154,7 @@ class Engine:
         else:
             next_at = next_open(max(now, lead.created_at), self.c, self.cfg.tz)
 
-        lead_id = self.store.insert(
-            """INSERT INTO leads(source,key,row_ref,created_at,received_at,name,student_name,phone,phone_raw,
-               campus,campus_raw,grade,grade_raw,email,city,status,attempts,next_attempt_at,note,raw,updated_at)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?)""",
-            (lead.source, lead.key, lead.row_ref, iso(lead.created_at), iso(now), clean_name(lead.name),
-             clean_name(lead.student_name), phone, lead.phone, campus, lead.campus, grade, lead.grade_text,
-             lead.email, lead.city, status.value, iso(next_at) if next_at else None, note,
-             self.store.dump_raw(lead.raw), iso(now)))
+        lead_id = self.store.insert(self.INSERT_LEAD, self._insert_args(lead, now, status, note, next_at))
         if catch_up and status == Status.QUEUED:
             self.store.update_lead(lead_id, now, allow_old=1)
         fresh = now - lead.created_at <= timedelta(hours=self.c["stale_after_hours"])

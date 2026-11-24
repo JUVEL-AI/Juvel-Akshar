@@ -1033,3 +1033,13 @@ def test_backfill_window_calls_only_that_range_and_new_rows():
     assert st("sep") == "STALE" and st("apr") == "STALE"
     e.ingest([lead("new", phone="9876500005", at=MON_10AM)], MON_10AM)
     assert st("new") == "QUEUED"
+
+
+def test_first_read_is_bulk_and_repeat_reads_are_cheap():
+    e, s, d, n = mk()
+    rows = [lead(f"k{i}", phone=f"98765{i:05d}", at=MON_10AM - timedelta(days=3)) for i in range(50)]
+    assert e.ingest(rows, MON_10AM, baseline=True)["new"] == 50
+    assert s.one("SELECT COUNT(*) n FROM leads WHERE status='STALE' AND note LIKE 'already in the sheet%'")["n"] == 50
+    again = e.ingest(rows + [lead("fresh", phone="9876599999", at=MON_10AM)], MON_10AM)
+    assert again["new"] == 1 and again["skipped_existing"] == 50
+    assert s.one("SELECT status FROM leads WHERE key='fresh'")["status"] == "QUEUED"

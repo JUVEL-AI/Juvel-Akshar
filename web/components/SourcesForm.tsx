@@ -48,6 +48,9 @@ export default function SourcesForm({ initial }: { initial: SourcesData | null }
 
       {rows.map((r, i) => (
         <section className="card set" key={i}>
+          <p className="sub" style={{ margin: "0 0 6px" }}>{r.status
+            ? (r.status.error ? `Last read ${r.status.at}: PROBLEM – ${r.status.error}` : `Last read ${r.status.at}: ${r.status.rows ?? 0} rows in the sheet, ${r.status.readable ?? 0} readable`)
+            : "Not read yet (saved sheets are read about once a minute)"}</p>
           <div className="set-row">
             <label className="set-col" style={{ flex: 1 }}>Name
               <input value={r.label} onChange={(e) => upd(i, { label: e.target.value })} /></label>

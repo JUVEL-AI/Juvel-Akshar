@@ -111,6 +111,17 @@ class Store:
             return self.db.execute(self._sql(sql) + " RETURNING id", args).fetchone()["id"]
         return self.x(sql, args).lastrowid
 
+    def insert_many(self, sql: str, rows: list) -> None:
+        """Many rows in one go (the first read of a big sheet): far fewer round trips to Supabase than one INSERT each."""
+        if not rows:
+            return
+        if self.pg:
+            with self.db.cursor() as cur:
+                cur.executemany(self._sql(sql), rows)
+        else:
+            self.db.executemany(sql, rows)
+            self.db.commit()
+
     def update_lead(self, lead_id: int, now: datetime, **fields):
         fields["updated_at"] = iso(now)
         cols = ", ".join(f"{k}=?" for k in fields)

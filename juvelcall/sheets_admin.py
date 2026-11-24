@@ -225,7 +225,12 @@ def view(engine) -> dict:
     d = load(engine)
     creds = google_json(engine)
     sc = engine.cfg.sources or {}
-    return {"sheets": d["sheets"], "service_email": service_email(creds), "has_credentials": bool(creds),
+    def _st(sid):
+        try:
+            return json.loads(engine.store.kv_get("sheet_status_" + sid) or "null")
+        except Exception:
+            return None
+    return {"sheets": [{**s, "status": _st(s.get("id", ""))} for s in d["sheets"]], "service_email": service_email(creds), "has_credentials": bool(creds),
             "default_campus": sc.get("default_campus", "") or "", "date_order": sc.get("date_order", "mdy"),
             "presets": [{**p, "spreadsheet": p["spreadsheet_id"]} for p in sc.get("presets", [])],
             "from_server": bool(not d["sheets"] and configured(engine)),
@@ -234,7 +239,16 @@ def view(engine) -> dict:
 
 
 # ---------------- polling ----------------
-def poll_all(engine, now: datetime) -> dict:
+def _note_status(engine, sid: str, now: datetime, **info) -> None:
+    try:
+        engine.store.kv_set("sheet_status_" + sid, json.dumps({"at": now.astimezone(engine.cfg.tz).strftime("%d %b %H:%M"), **info}))
+    except Exception:
+        pass
+
+
+def poll_all(engine, now: datetime, budget: float = 35.0) -> dict:
+    import time
+    t0 = time.monotonic()
     from .sources.csv_source import lead_from_row
     creds = google_json(engine)
     sheets = configured(engine)
@@ -243,10 +257,14 @@ def poll_all(engine, now: datetime) -> dict:
     out = {}
     for s in sheets:
         key = "sheet_baselined_" + s["id"]
+        if time.monotonic() - t0 > budget:               # never hold up the calls: the rest is read on the next minute
+            out[s["label"]] = {"deferred": "time budget used; read again next minute"}
+            continue
         try:
             rows = read_rows(creds, s["spreadsheet_id"], s["worksheet"])
         except Exception as e:
             out[s["label"]] = {"error": _friendly(e, creds)}
+            _note_status(engine, s["id"], now, error=_friendly(e, creds))
             continue
         leads = []
         for i, row in enumerate(rows, start=2):
@@ -276,4 +294,6 @@ def poll_all(engine, now: datetime) -> dict:
             engine.store.kv_set(key, iso(now))
             res["baseline"] = since is None
         out[s["label"]] = res
+        _note_status(engine, s["id"], now, rows=len(rows), readable=len(leads), new=res.get("new", 0),
+                     error="" if leads else "no row could be read: check the columns chosen for this sheet")
     return out
