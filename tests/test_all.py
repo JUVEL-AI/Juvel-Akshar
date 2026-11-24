@@ -1043,3 +1043,14 @@ def test_first_read_is_bulk_and_repeat_reads_are_cheap():
     again = e.ingest(rows + [lead("fresh", phone="9876599999", at=MON_10AM)], MON_10AM)
     assert again["new"] == 1 and again["skipped_existing"] == 50
     assert s.one("SELECT status FROM leads WHERE key='fresh'")["status"] == "QUEUED"
+
+
+def test_older_enquiries_are_paced_per_minute_and_get_two_tries():
+    from datetime import datetime
+    e, s, d, n = mk()
+    since = datetime(2026, 10, 8, tzinfo=e.cfg.tz)
+    rows = [lead(f"p{i}", phone=f"98765433{i:02d}", at=MON_10AM - timedelta(days=5)) for i in range(6)]
+    e.ingest(rows, MON_10AM, since=since)
+    assert len(e.tick(MON_10AM)) == 2
+    assert len(e.tick(MON_10AM + timedelta(seconds=20))) == 0          # another tick inside the same minute adds nothing
+    assert len(e.tick(MON_10AM + timedelta(seconds=70))) == 2

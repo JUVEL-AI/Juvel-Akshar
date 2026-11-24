@@ -184,7 +184,9 @@ class Engine:
             "SELECT * FROM leads WHERE source<>'test' AND status IN (?,?) AND next_attempt_at<=? ORDER BY next_attempt_at LIMIT ?",
             (Status.QUEUED.value, Status.RETRY.value, iso(now), limit))
         pace = int(self.c.get("backfill_per_minute", 3) or 3)       # older enquiries (start-date catch-up) go out a few a minute
-        caught_up = 0
+        caught_up = self.store.one(                       # older-enquiry calls already placed in the last 60 s (every webhook also runs a tick)
+            "SELECT COUNT(*) n FROM calls c JOIN leads l ON l.id=c.lead_id WHERE l.allow_old=1 AND c.started_at>?",
+            (iso(now - timedelta(seconds=60)),))["n"]
         for r in rows:
             made = parse(r["created_at"])
             if r["allow_old"] and caught_up >= pace:
@@ -339,13 +341,16 @@ class Engine:
             self._parent_followup(lead, "callback", now)
         else:   # NO_ANSWER / BUSY / FAILED
             attempts = lead["attempts"]
-            if attempts >= self.c["max_attempts"]:
+            old = bool(lead["allow_old"])                  # older-enquiry catch-up: fewer tries, and no alert email per parent
+            cap = int(self.c.get("backfill_max_attempts", 2) or 2) if old else self.c["max_attempts"]
+            if attempts >= cap:
                 self.store.update_lead(lead["id"], now, status=Status.NO_RESPONSE.value,
                                        last_outcome=ev.kind.value, next_attempt_at=None)
-                self._alert(now, "no_response", lead["id"],
-                            f"Parent not reachable after {attempts} attempts",
-                            self._lead_summary(lead) + "\nAll automatic attempts used. Please try manually.")
-                self._parent_followup(lead, "no_response", now)
+                if not old:
+                    self._alert(now, "no_response", lead["id"],
+                                f"Parent not reachable after {attempts} attempts",
+                                self._lead_summary(lead) + "\nAll automatic attempts used. Please try manually.")
+                    self._parent_followup(lead, "no_response", now)
             else:
                 delays = self.c["retry_minutes"]
                 delay = delays[min(attempts - 1, len(delays) - 1)]
