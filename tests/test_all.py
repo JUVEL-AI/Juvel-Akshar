@@ -1017,3 +1017,19 @@ def test_website_form_formats():
     assert clean_grade("E2") == "ELC 2"
     assert clean_grade("TD") == "Toddler"
     assert clean_grade("G6") == "6th grade"
+
+
+def test_backfill_window_calls_only_that_range_and_new_rows():
+    from datetime import datetime
+    e, s, d, n = mk()
+    rows = [lead("may", phone="9876500001", at=datetime(2026, 5, 10, 11, tzinfo=e.cfg.tz)),
+            lead("jul", phone="9876500002", at=datetime(2026, 7, 31, 11, tzinfo=e.cfg.tz)),
+            lead("sep", phone="9876500003", at=datetime(2026, 9, 10, 11, tzinfo=e.cfg.tz)),
+            lead("apr", phone="9876500004", at=datetime(2026, 4, 30, 11, tzinfo=e.cfg.tz))]
+    e.ingest(rows, MON_10AM, baseline=True)
+    out = e.revive_range("t", datetime(2026, 5, 1, tzinfo=e.cfg.tz), datetime(2026, 7, 31, tzinfo=e.cfg.tz), MON_10AM)
+    st = lambda k: s.one("SELECT status FROM leads WHERE key=?", (k,))["status"]
+    assert out["queued"] == 2 and st("may") == "QUEUED" and st("jul") == "QUEUED"
+    assert st("sep") == "STALE" and st("apr") == "STALE"
+    e.ingest([lead("new", phone="9876500005", at=MON_10AM)], MON_10AM)
+    assert st("new") == "QUEUED"

@@ -188,8 +188,19 @@ def validate(engine, payload: dict) -> dict:
                 datetime.strptime(sf, "%Y-%m-%d")
             except ValueError:
                 raise ValueError(f"{label}: the start date must look like 2026-11-01") from None
+        bf, bt = (str(s.get("backfill_from") or "").strip(), str(s.get("backfill_to") or "").strip())
+        if bool(bf) != bool(bt):
+            raise ValueError(f"{label}: fill both dates of 'also call older enquiries', or neither")
+        if bf:
+            try:
+                a, b = datetime.strptime(bf, "%Y-%m-%d"), datetime.strptime(bt, "%Y-%m-%d")
+            except ValueError:
+                raise ValueError(f"{label}: dates must look like 2026-05-01") from None
+            if a > b:
+                raise ValueError(f"{label}: the older-enquiries 'from' date is after its 'to' date")
         out["sheets"].append({"id": str(s.get("id") or sid[:8] + str(i)), "label": label, "spreadsheet_id": sid,
-                              "worksheet": ws, "columns": cols, "enabled": bool(s.get("enabled", True)), "start_from": sf})
+                              "worksheet": ws, "columns": cols, "enabled": bool(s.get("enabled", True)), "start_from": sf,
+                              "backfill_from": bf, "backfill_to": bt})
     dc = str(payload.get("default_campus", "") or "").strip()
     if dc and dc not in engine._base["campuses"]:
         raise ValueError("Unknown default campus")
@@ -256,6 +267,11 @@ def poll_all(engine, now: datetime) -> dict:
         res = engine.ingest(leads, now, baseline=first and since is None, since=since)
         if since:
             res["from_date"] = sf
+        bf, bt = str(s.get("backfill_from") or ""), str(s.get("backfill_to") or "")
+        if bf and bt and engine.store.kv_get("sheet_backfill_" + s["id"]) != f"{bf}|{bt}":
+            res["backfill"] = engine.revive_range("sheet_" + s["id"], datetime.strptime(bf, "%Y-%m-%d").replace(tzinfo=engine.cfg.tz),
+                                                  datetime.strptime(bt, "%Y-%m-%d").replace(tzinfo=engine.cfg.tz), now)
+            engine.store.kv_set("sheet_backfill_" + s["id"], f"{bf}|{bt}")
         if first:
             engine.store.kv_set(key, iso(now))
             res["baseline"] = since is None

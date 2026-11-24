@@ -205,6 +205,36 @@ class Engine:
                 n += 1
         return n
 
+    def revive_range(self, source: str, d_from: datetime, d_to: datetime, now: datetime) -> dict:
+        """One-off catch-up asked for by the school: enquiries dated d_from..d_to (inclusive) that were skipped as old are
+        queued and called at the paced backfill rate. Bad phones, do-not-call numbers, unknown campuses and phones already
+        enquired or called elsewhere are left alone."""
+        end = d_to + timedelta(days=1)
+        done = {"queued": 0, "skipped": 0}
+        taken: set[str] = set()
+        live = (Status.STALE.value, Status.DUPLICATE.value, Status.INVALID_PHONE.value, Status.DO_NOT_CALL.value, Status.NEEDS_REVIEW.value)
+        rows = self.store.q("SELECT * FROM leads WHERE source=? AND status=? AND (note LIKE ? OR note LIKE ? OR note LIKE ?) ORDER BY created_at",
+                            (source, Status.STALE.value, "already in the sheet%", "before the start date%", "lead too old%"))
+        for r in rows:
+            made = parse(r["created_at"])
+            if not made or made < d_from or made >= end:
+                continue
+            phone = clean_phone(r["phone"] or "")
+            campus = canonical_campus(r["campus"] or "") or ""
+            if campus not in self.cfg.campuses:
+                grade_or_open = (r["campus"] or "").strip().lower()
+                campus = (self.cfg.sources.get("default_campus") or "") if (not grade_or_open or "either" in grade_or_open) else ""
+            busy = phone and self.store.one("SELECT 1 FROM leads WHERE phone=? AND id<>? AND status NOT IN (?,?,?,?,?)",
+                                            (phone, r["id"], *live)) is not None
+            if not phone or self.store.is_dnc(phone) or campus not in self.cfg.campuses or busy or phone in taken:
+                done["skipped"] += 1
+                continue
+            taken.add(phone)
+            self.store.update_lead(r["id"], now, status=Status.QUEUED.value, allow_old=1, note="", campus=campus,
+                                   next_attempt_at=iso(next_open(now, self.c, self.cfg.tz)))
+            done["queued"] += 1
+        return done
+
     def build_plan(self, r) -> CallPlan:
         campus = self.cfg.campuses[r["campus"]]
         counselor = self._on_duty(r["campus"]) or campus["counselors"][0]

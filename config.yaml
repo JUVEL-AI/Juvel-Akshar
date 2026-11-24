@@ -123,6 +123,8 @@ sources:
       spreadsheet_id: "1hqnfahxY-agKd8NiJ4l3lpz8Q4W3DzRjUYQdhJO0iLY"
       worksheet: "2023-26"
       enabled: true
+      backfill_from: "2026-05-01"          # the school also wants these older enquiries called once (paced)
+      backfill_to: "2026-07-31"
       columns: {created_at: "date", name: "fname", student_name: "namechild", phone: "fcontactno", campus: "preferred-campus", grade: "admission-sought", email: "femail"}
     - label: "Website form, new (SM Lead tab, stopped June 2026)"
       spreadsheet_id: "1hqnfahxY-agKd8NiJ4l3lpz8Q4W3DzRjUYQdhJO0iLY"
