@@ -509,7 +509,7 @@ def export_csv(engine, day: str | None, now: datetime) -> str:
     return buf.getvalue()
 
 
-def search(engine, q: str, limit: int = 40) -> list[dict]:
+def search(engine, q: str, limit: int = 40, campus: str = "") -> list[dict]:
     from .console import mask
     q = q.strip()
     if len(q) < 3:
@@ -517,11 +517,11 @@ def search(engine, q: str, limit: int = 40) -> list[dict]:
     digits = re.sub(r"\D", "", q)
     like = f"%{q.lower()}%"
     if len(digits) >= 4:
-        rows = engine.store.q("SELECT * FROM leads WHERE source<>'test' AND (phone LIKE ? OR phone_raw LIKE ?) ORDER BY id DESC LIMIT ?",
-                              (f"%{digits}%", f"%{digits}%", limit))
+        rows = engine.store.q("SELECT * FROM leads WHERE source<>'test' AND (phone LIKE ? OR phone_raw LIKE ?) AND (?='' OR campus=?) ORDER BY id DESC LIMIT ?",
+                              (f"%{digits}%", f"%{digits}%", campus, campus, limit))
     else:
         rows = engine.store.q("SELECT * FROM leads WHERE source<>'test' AND (LOWER(name) LIKE ? OR LOWER(student_name) LIKE ?) "
-                              "ORDER BY id DESC LIMIT ?", (like, like, limit))
+                              "AND (?='' OR campus=?) ORDER BY id DESC LIMIT ?", (like, like, campus, campus, limit))
     tz = engine.cfg.tz
     return [{"id": r["id"], "when": parse(r["created_at"]).astimezone(tz).strftime("%d %b %H:%M"),
              "parent": r["name"] or "", "student": r["student_name"] or "", "class": r["grade"] or "",

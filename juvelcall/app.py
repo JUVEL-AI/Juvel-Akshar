@@ -237,9 +237,9 @@ def create_app(engine: Engine, clock=now_utc, run_loop: bool = False, loop_secon
         return [dict(r) for r in rows]
 
     @app.get("/api/search")
-    def api_search(q: str = "", x_webhook_secret: str | None = Header(default=None)):
+    def api_search(q: str = "", campus: str = "", x_webhook_secret: str | None = Header(default=None)):
         auth(x_webhook_secret)
-        return ops.search(engine, q)
+        return ops.search(engine, q, campus=campus)
 
     @app.get("/api/export")
     def api_export(day: str | None = None, by: str = "dashboard", x_webhook_secret: str | None = Header(default=None)):
@@ -279,9 +279,23 @@ def create_app(engine: Engine, clock=now_utc, run_loop: bool = False, loop_secon
     @app.post("/api/lead/{lead_id}/resolve")
     def api_resolve(lead_id: int, payload: dict | None = None, x_webhook_secret: str | None = Header(default=None)):
         auth(x_webhook_secret)
+        only = str((payload or {}).get("campus", "") or "")          # a campus-limited counselor may only close their own campus's leads
+        if only and not engine.store.one("SELECT 1 FROM leads WHERE id=? AND campus=?", (lead_id, only)):
+            raise HTTPException(404, "no such lead")
         if not engine.resolve(lead_id, clock(), (payload or {}).get("note", ""), str((payload or {}).get("by", ""))[:40]):
             raise HTTPException(404, "no such lead")
         return {"ok": True}
+
+    @app.post("/api/recall")
+    def api_recall(payload: dict, x_webhook_secret: str | None = Header(default=None)):
+        auth(x_webhook_secret)
+        if payload.get("action") == "cancel":
+            return {"cancelled": engine.recall_cancel(clock(), str(payload.get("by", ""))[:40])}
+        res = engine.recall([i for i in payload.get("ids", []) if isinstance(i, int)][:200], clock(),
+                            str(payload.get("by", ""))[:40], str(payload.get("campus", "") or ""))
+        if res.get("error"):
+            raise HTTPException(409, res["error"])
+        return res
 
     @app.post("/api/lead/{lead_id}/call-now")
     def api_call_now(lead_id: int, payload: dict | None = None, x_webhook_secret: str | None = Header(default=None)):

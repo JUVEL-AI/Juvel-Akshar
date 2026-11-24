@@ -1,14 +1,19 @@
 /** Session cookie for the dashboard. Works in the Edge middleware and in route handlers (Web Crypto only). */
 export type Role = "super" | "admin" | "staff";   // super: everything incl. phone/Vapi connections; admin: settings, sheets, recordings; staff: leads only
-export type U = { name: string; pw: string; role: Role };
+export type U = { name: string; pw: string; role: Role; campus?: string };
 export const COOKIE = "juvel_session";
 export const SESSION_HOURS = 12;
 
 export function users(): U[] {
   return (process.env.CONSOLE_USERS ?? "").split(",").map((s) => s.trim()).filter(Boolean).map((s) => {
-    const [name, pw, role] = s.split(":");
-    return { name, pw, role: role === "super" ? "super" : role === "admin" ? "admin" : "staff" } as U;
+    const [name, pw, role, campus] = s.split(":");        // name:password:role[:campus]  e.g. vidya:pw:staff:ecr
+    return { name, pw, role: role === "super" ? "super" : role === "admin" ? "admin" : "staff", campus: (campus ?? "").trim() || undefined } as U;
   }).filter((u) => u.name && u.pw);
+}
+/** The one campus a staff login is limited to (set as the 4th part of CONSOLE_USERS). Admins and the super admin see every campus. */
+export function campusScope(name: string, role: Role): string | null {
+  if (role !== "staff") return null;
+  return users().find((u) => u.name.toLowerCase() === name.trim().toLowerCase())?.campus ?? null;
 }
 export const authOn = () => users().length > 0 || !!process.env.CONSOLE_PASSWORD;
 

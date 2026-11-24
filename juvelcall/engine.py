@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -180,6 +181,7 @@ class Engine:
         if self.control_state() != "running":
             self.watchdog(now)               # only closes stuck calls while paused/stopped
             return placed
+        placed += self._advance_recall(now)
         rows = self.store.q(
             "SELECT * FROM leads WHERE source<>'test' AND status IN (?,?) AND next_attempt_at<=? ORDER BY next_attempt_at LIMIT ?",
             (Status.QUEUED.value, Status.RETRY.value, iso(now), limit))
@@ -426,6 +428,73 @@ class Engine:
         self.tick(now)
         self.store.x("DELETE FROM kv WHERE k=?", (f"force_{lead_id}",))
         return ""
+
+    # ---------- call-backs, one parent at a time ----------
+    RECALL_OK = ("ANSWERED_NOT_TRANSFERRED", "NO_RESPONSE")
+
+    def _recall_queue(self) -> list[int]:
+        try:
+            return [int(x) for x in json.loads(self.store.kv_get("recall_queue") or "[]")]
+        except Exception:
+            return []
+
+    def _save_recall(self, q: list[int]) -> None:
+        self.store.kv_set("recall_queue", json.dumps(q))
+
+    def recall(self, ids: list, now: datetime, who: str = "", campus: str = "") -> dict:
+        """Counselor or admin: call these parents back, one at a time. The next call starts only when the previous one has ended."""
+        if self.control_state() != "running":
+            return {"queued": 0, "waiting": len(self._recall_queue()), "error": "Calling is paused or stopped. Press Start first"}
+        q = self._recall_queue()
+        added = 0
+        for i in ids:
+            r = self.store.one("SELECT * FROM leads WHERE id=?", (int(i),))
+            if (not r or r["status"] not in self.RECALL_OK or not r["phone"] or not r["campus"]
+                    or self.store.is_dnc(r["phone"]) or (campus and r["campus"] != campus) or r["id"] in q):
+                continue
+            q.append(r["id"])
+            added += 1
+        self._save_recall(q)
+        self.store.add_audit(now, who, "recall", f"{added} parent(s) queued for call back")
+        started = self._advance_recall(now)
+        return {"queued": added, "waiting": len(self._recall_queue()), "started": len(started)}
+
+    def recall_cancel(self, now: datetime, who: str = "") -> int:
+        n = len(self._recall_queue())
+        self._save_recall([])
+        self.store.add_audit(now, who, "recall_cancel", f"{n} parent(s) taken off the call-back list")
+        return n
+
+    def _advance_recall(self, now: datetime) -> list[str]:
+        """Start the next call-back if the previous one has finished, we are inside calling hours and the counselor is on duty."""
+        q = self._recall_queue()
+        if not q or self.control_state() != "running" or not in_hours(now, self.c, self.cfg.tz):
+            return []
+        active = self.store.kv_get("recall_active")
+        if active:
+            a = self.store.one("SELECT status, updated_at FROM leads WHERE id=?", (int(active),))
+            t = parse(a["updated_at"]) if a else None
+            if a and a["status"] in (Status.CALLING.value, Status.QUEUED.value) and t and now - t < timedelta(minutes=20):
+                return []                                   # the previous call-back is still going
+        while q:
+            lid = q[0]
+            r = self.store.one("SELECT * FROM leads WHERE id=?", (lid,))
+            if not r or r["status"] not in self.RECALL_OK or not r["phone"] or self.store.is_dnc(r["phone"]):
+                q.pop(0)
+                continue
+            if not self._on_duty(r["campus"]):
+                break                                       # nobody on duty: wait
+            q.pop(0)
+            self.store.update_lead(lid, now, status=Status.QUEUED.value, attempts=0, next_attempt_at=iso(now),
+                                   note="call back started from the dashboard")
+            ref = self._place(self.store.one("SELECT * FROM leads WHERE id=?", (lid,)), now)
+            self._save_recall(q)
+            if ref:
+                self.store.kv_set("recall_active", str(lid))
+                return [ref]
+            return []
+        self._save_recall(q)
+        return []
 
     def delete_lead(self, lead_id: int, now: datetime, who: str = "") -> str:
         """Admin: remove an enquiry and its call records, so the same number can be tried again. Returns '' or a reason."""
