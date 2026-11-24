@@ -1127,3 +1127,18 @@ def test_each_campus_has_its_own_start_pause_stop():
     assert e.can_call("t_nagar") and not e.can_call("ecr")
     e.set_control("pause", MON_10AM + timedelta(minutes=3), "priya")           # the master switch overrides every campus
     assert not e.can_call("t_nagar")
+
+
+def test_calling_card_announces_before_and_lingers_after():
+    from juvelcall import console
+    e, s, d, n = mk()
+    e.ingest([lead("cc1", phone="9876548001")], MON_10AM)
+    before = console.build(e, MON_10AM - timedelta(seconds=1))["live"]
+    e.tick(MON_10AM)
+    during = console.build(e, MON_10AM)["live"]
+    assert [x["phase"] for x in during] == ["calling"]
+    lid = during[0]["id"]
+    e.resolve(lid, MON_10AM + timedelta(seconds=30), "x", "t")
+    assert [x["phase"] for x in console.build(e, MON_10AM + timedelta(seconds=40))["live"]] == ["recent"]
+    assert console.build(e, MON_10AM + timedelta(minutes=10))["live"] == []
+    assert all(x["phase"] in ("next", "calling", "recent") for x in before)

@@ -14,6 +14,10 @@ def mask(phone: str | None) -> str:
     return f"{phone[:3]} {phone[3:5]}••• ••{phone[-3:]}"
 
 
+LINGER_SECONDS = 150      # a call stays on the calling card this long after it ends
+NEXT_SECONDS = 120        # a call is announced on the card this long before it is placed
+
+
 def source_labels(engine) -> dict:
     """source key -> sheet name, read once per dashboard load (not once per row)."""
     from . import sheets_admin
@@ -85,12 +89,27 @@ def build(engine, now: datetime, day: str | None = None, test: bool = False) -> 
     attention = [l for l in leads if l["status"] in
                  ("ANSWERED_NOT_TRANSFERRED", "NEEDS_REVIEW", "NO_RESPONSE", "INVALID_PHONE", "STALE")]
     live = []
-    if not test:                      # calls on the line right now: who the counselor is about to speak to
+    if not test:                      # the calling card: who is on the line, who was just called, who is called next
+        def card(r, phase):
+            return {"id": r["id"], "phase": phase, "status": r["status"], "source": source_label(labels, r["source"]),
+                    "parent": r["name"] or "", "student": r["student_name"] or "", "class": r["grade"] or "",
+                    "campus": r["campus"] or "", "attempt": r["attempts"],
+                    "since": parse(r["updated_at"]).astimezone(cfg.tz).strftime("%H:%M")}
         for r in store.q("SELECT * FROM leads WHERE source<>'test' AND status=? AND updated_at>=? ORDER BY updated_at DESC",
                          (Status.CALLING.value, iso(now - timedelta(minutes=10)))):
-            live.append({"id": r["id"], "source": source_label(labels, r["source"]), "parent": r["name"] or "", "student": r["student_name"] or "", "class": r["grade"] or "",
-                         "campus": r["campus"] or "", "attempt": r["attempts"],
-                         "since": parse(r["updated_at"]).astimezone(cfg.tz).strftime("%H:%M")})
+            live.append(card(r, "calling"))
+        for r in store.q("SELECT * FROM leads WHERE source<>'test' AND status<>? AND updated_at>=? AND id IN "
+                         "(SELECT lead_id FROM calls WHERE started_at>=?) ORDER BY updated_at DESC LIMIT 12",
+                         (Status.CALLING.value, iso(now - timedelta(seconds=LINGER_SECONDS)), iso(now - timedelta(minutes=15)))):
+            live.append(card(r, "recent"))
+        if engine.control_state() == "running":
+            for campus in cfg.campuses:   # at most two per campus, due within the next two minutes
+                if engine.campus_state(campus) != "running":
+                    continue
+                for r in store.q("SELECT * FROM leads WHERE source<>'test' AND campus=? AND status IN (?,?) AND next_attempt_at<=? "
+                                 "ORDER BY next_attempt_at LIMIT 2",
+                                 (campus, Status.QUEUED.value, Status.RETRY.value, iso(now + timedelta(seconds=NEXT_SECONDS)))):
+                    live.append(card(r, "next"))
     return {
         "recall": {"waiting": len(engine._recall_queue())},
         "live": live,

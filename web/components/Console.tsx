@@ -56,6 +56,8 @@ export default function Console({ data, demo, error, pinRequired = false, role =
   const router = useRouter();
   const [campus, setCampus] = useState("all");
   const [filter, setFilter] = useState("all");
+  const [pageSize, setPageSize] = useState<"10" | "50" | "100" | "all">("50");
+  const [page, setPage] = useState(0);
   const [picked, setPicked] = useState<number | null>(null);
   const [stage, setStage] = useState(0);
   const [ask, setAsk] = useState<"start" | "pause" | "stop" | null>(null);
@@ -87,6 +89,10 @@ export default function Console({ data, demo, error, pinRequired = false, role =
   const label = (k: string) => data.campuses[k] ?? (k ? k : "Campus unknown");
   const inCampus = useMemo(() => data.leads.filter((l) => campus === "all" || l.campus === campus), [data, campus]);
   const rows = inCampus.filter((l) => filter === "all" || meta(l.status).group === filter);
+  const per = pageSize === "all" ? Math.max(rows.length, 1) : Number(pageSize);
+  const pages = Math.max(1, Math.ceil(rows.length / per));
+  const pg = Math.min(page, pages - 1);
+  const shown = rows.slice(pg * per, pg * per + per);
   const sel = data.leads.find((l) => l.id === picked) ?? rows[0] ?? data.leads[0];
 
   const called = inCampus.filter((l) => l.first_call_seconds !== null);
@@ -280,16 +286,22 @@ export default function Console({ data, demo, error, pinRequired = false, role =
       </nav>
 
       {liveNow.length > 0 && (
-        <section className="card" aria-label="Calls on the line now" style={{ borderColor: "#3DDC97", marginBottom: 14 }}>
-          <h2 style={{ color: "#3DDC97", marginBottom: 8 }}>On the line now</h2>
-          {liveNow.map((l) => (
-            <div key={l.id} style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "baseline", padding: "6px 0", fontSize: 17 }}>
-              <b>{l.parent || "Parent"}</b>
-              <span>From <b>{l.source || "enquiry"}</b></span>
-              {Object.keys(data.campuses).length > 1 && <span className="sub">{data.campuses[l.campus] ?? l.campus}</span>}
-              <span className="sub">called {l.since}</span>
-            </div>
-          ))}
+        <section className="card" aria-label="Calling card" style={{ borderColor: liveNow.some((l) => l.phase === "calling") ? "#3DDC97" : "#2A3A4B", marginBottom: 14 }}>
+          <h2 style={{ color: "#3DDC97", marginBottom: 8 }}>Calling card</h2>
+          {[...liveNow].sort((x, y) => ["calling", "next", "recent"].indexOf(x.phase ?? "calling") - ["calling", "next", "recent"].indexOf(y.phase ?? "calling")).map((l) => {
+            const tag = l.phase === "next" ? { t: "Calling next", c: "#FFB547" } : l.phase === "recent" ? { t: meta(l.status ?? "").label, c: "#8FA1B5" } : { t: "On the line", c: "#3DDC97" };
+            return (
+              <button key={`${l.phase}-${l.id}`} type="button" onClick={() => setPicked(l.id)}
+                style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "baseline", padding: "6px 0", fontSize: 17, width: "100%", textAlign: "left", background: "none", border: 0, color: "inherit", cursor: "pointer" }}>
+                <span className="pill" style={{ color: tag.c, background: "rgba(255,255,255,.06)" }}>{tag.t}</span>
+                <b>{l.parent || "Parent"}</b>
+                <span>From <b>{l.source || "enquiry"}</b></span>
+                {Object.keys(data.campuses).length > 1 && <span className="sub">{data.campuses[l.campus] ?? l.campus}</span>}
+                <span className="sub">{l.phase === "next" ? "due within about a minute" : `called ${l.since}`}</span>
+              </button>
+            );
+          })}
+          <div className="sub" style={{ marginTop: 6 }}>Tap a name to see the call details below.</div>
         </section>
       )}
 
@@ -327,38 +339,6 @@ export default function Console({ data, demo, error, pinRequired = false, role =
               </div>
             </div>
             <div className="say"><b>{st.says}</b><br />{st.text}</div>
-          </section>
-
-          <section className="card table">
-            <div className="row-between" style={{ padding: "0 18px" }}>
-              <h2>Today&apos;s enquiries</h2>
-            </div>
-            <div className="fchips">
-              {FILTERS.map(([k, name]) => <button key={k} type="button" className="fchip" aria-pressed={filter === k} onClick={() => setFilter(k)}>{name}</button>)}
-            </div>
-            {filter === "callback" && !demo && (
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", padding: "6px 18px 10px" }}>
-                <button type="button" className="fchip" disabled={!rows.length} onClick={() => recall(rows.map((l) => l.id))}>📞 Call back all {rows.length}, one by one</button>
-                {recallWaiting > 0 && <button type="button" className="fchip" onClick={recallCancel}>■ Stop the list ({recallWaiting} waiting)</button>}
-                {recallMsg && <span className="sub" role="status">{recallMsg}</span>}
-              </div>)}
-            <div className="scroll"><div className="t-in">
-              <div className="cols th"><span>Time</span><span>Parent / student</span><span>Campus · class</span><span>First call</span><span>Status</span><span>Attempts</span></div>
-              {rows.map((l) => {
-                const m = meta(l.status);
-                return (
-                  <button key={l.id} type="button" className="cols tr" aria-pressed={sel?.id === l.id} onClick={() => setPicked(l.id)}>
-                    <span className="mono sub">{l.time}</span>
-                    <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}><b>{l.parent || "—"}</b><span className="sub">{l.student ? `Student ${l.student}` : "Student name not given"}</span></span>
-                    <span style={{ fontSize: 13.5, color: "#C4D0DD" }}>{label(l.campus)} · {l.class || "Class unclear"}</span>
-                    <span className="mono" style={{ fontSize: 13, color: (l.first_call_seconds ?? 9999) <= 300 ? "#3DDC97" : "#8FA1B5" }}>{mmss(l.first_call_seconds)}</span>
-                    <span><span className="pill" style={{ color: m.tone, background: m.bg }}>{l.status === "RETRY" ? `Retry ${l.attempts} of 4` : m.label}</span></span>
-                    <span className="mono sub">{l.attempts} / 4</span>
-                  </button>
-                );
-              })}
-              {rows.length === 0 && <div style={{ padding: "28px 18px", color: "#8FA1B5", fontSize: 14 }}>No enquiries match this filter.</div>}
-            </div></div>
           </section>
 
           {sel && (
@@ -407,6 +387,49 @@ export default function Console({ data, demo, error, pinRequired = false, role =
               </div>
             </section>
           )}
+
+          <section className="card table">
+            <div className="row-between" style={{ padding: "0 18px" }}>
+              <h2>Today&apos;s enquiries</h2>
+            </div>
+            <div className="fchips">
+              {FILTERS.map(([k, name]) => <button key={k} type="button" className="fchip" aria-pressed={filter === k} onClick={() => { setFilter(k); setPage(0); }}>{name}</button>)}
+            </div>
+            {filter === "callback" && !demo && (
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", padding: "6px 18px 10px" }}>
+                <button type="button" className="fchip" disabled={!rows.length} onClick={() => recall(rows.map((l) => l.id))}>📞 Call back all {rows.length}, one by one</button>
+                {recallWaiting > 0 && <button type="button" className="fchip" onClick={recallCancel}>■ Stop the list ({recallWaiting} waiting)</button>}
+                {recallMsg && <span className="sub" role="status">{recallMsg}</span>}
+              </div>)}
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", padding: "6px 18px 10px" }}>
+              <label className="sub">Show{" "}
+                <select value={pageSize} onChange={(e) => { setPageSize(e.target.value as "10" | "50" | "100" | "all"); setPage(0); }} aria-label="Records per page">
+                  <option value="10">10</option><option value="50">50</option><option value="100">100</option><option value="all">All (100+)</option>
+                </select>{" "}per page
+              </label>
+              <span className="sub">{rows.length ? `${pg * per + 1}–${Math.min(rows.length, pg * per + per)} of ${rows.length}` : "0 records"}</span>
+              <button type="button" className="fchip" disabled={pg === 0} onClick={() => setPage(pg - 1)}>‹ Previous</button>
+              <button type="button" className="fchip" disabled={pg >= pages - 1} onClick={() => setPage(pg + 1)}>Next ›</button>
+            </div>
+            <div className="scroll"><div className="t-in">
+              <div className="cols th"><span>Time</span><span>Parent / student</span><span>Campus · class</span><span>First call</span><span>Status</span><span>Attempts</span></div>
+              {shown.map((l) => {
+                const m = meta(l.status);
+                return (
+                  <button key={l.id} type="button" className="cols tr" aria-pressed={sel?.id === l.id} onClick={() => setPicked(l.id)}>
+                    <span className="mono sub">{l.time}</span>
+                    <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}><b>{l.parent || "—"}</b><span className="sub">{l.student ? `Student ${l.student}` : "Student name not given"}</span></span>
+                    <span style={{ fontSize: 13.5, color: "#C4D0DD" }}>{label(l.campus)} · {l.class || "Class unclear"}</span>
+                    <span className="mono" style={{ fontSize: 13, color: (l.first_call_seconds ?? 9999) <= 300 ? "#3DDC97" : "#8FA1B5" }}>{mmss(l.first_call_seconds)}</span>
+                    <span><span className="pill" style={{ color: m.tone, background: m.bg }}>{l.status === "RETRY" ? `Retry ${l.attempts} of 4` : m.label}</span></span>
+                    <span className="mono sub">{l.attempts} / 4</span>
+                  </button>
+                );
+              })}
+              {rows.length === 0 && <div style={{ padding: "28px 18px", color: "#8FA1B5", fontSize: 14 }}>No enquiries match this filter.</div>}
+            </div></div>
+          </section>
+
         </div>
 
         <aside className="side">
