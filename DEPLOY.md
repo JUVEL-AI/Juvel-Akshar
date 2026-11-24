@@ -40,3 +40,8 @@ call immediately through the lead webhook.
 - **Supabase**: run `supabase/security.sql` once in the SQL Editor (locks the tables against the public anon key).
 - **Retention** is in `config.yaml` under `privacy:` (recordings 30 days, enquiries 180 days; 0 = keep). A purge runs daily after 2am IST.
 - Put a consent line on the registration form: "I agree to be called, and the call may be recorded, for admissions."
+
+## Limiting a counselor to one campus
+`CONSOLE_USERS` entries are `name:password:role` and may take a 4th part, the campus key (`ecr` or `t_nagar`), for staff only:
+`juvel:<pw>:super,priya:<pw>:admin,vidya:<pw>:staff:ecr,viji:<pw>:staff:t_nagar`
+A staff login with a campus sees only that campus's enquiries, live calls and search results. Admin and super see both. Without the 4th part a staff login sees every campus.
