@@ -1054,3 +1054,16 @@ def test_older_enquiries_are_paced_per_minute_and_get_two_tries():
     assert len(e.tick(MON_10AM)) == 2
     assert len(e.tick(MON_10AM + timedelta(seconds=20))) == 0          # another tick inside the same minute adds nothing
     assert len(e.tick(MON_10AM + timedelta(seconds=70))) == 2
+
+
+def test_dashboard_lists_older_enquiries_called_today():
+    from datetime import datetime
+    from juvelcall import console
+    e, s, d, n = mk()
+    since = datetime(2026, 10, 8, tzinfo=e.cfg.tz)
+    e.ingest([lead("old1", phone="9876544001", at=MON_10AM - timedelta(days=9)),
+              lead("new1", phone="9876544002", at=MON_10AM - timedelta(minutes=1))], MON_10AM, since=since)
+    e.tick(MON_10AM)
+    out = console.build(e, MON_10AM)
+    older = [l for l in out["leads"] if l["older"]]
+    assert len(older) == 1 and out["kpis"]["older_called"] == 1 and out["kpis"]["enquiries"] == 1
