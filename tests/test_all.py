@@ -1067,3 +1067,13 @@ def test_dashboard_lists_older_enquiries_called_today():
     out = console.build(e, MON_10AM)
     older = [l for l in out["leads"] if l["older"]]
     assert len(older) == 1 and out["kpis"]["older_called"] == 1 and out["kpis"]["enquiries"] == 1
+
+
+def test_dashboard_shows_who_is_on_the_line_now():
+    from juvelcall import console
+    e, s, d, n = mk()
+    e.ingest([lead("live1", phone="9876545001", student="Riya")], MON_10AM)
+    e.tick(MON_10AM)
+    out = console.build(e, MON_10AM)
+    assert [x["student"] for x in out["live"]] == ["Riya"]
+    assert console.build(e, MON_10AM + timedelta(minutes=30))["live"] == []     # a stuck 'calling' row does not show forever

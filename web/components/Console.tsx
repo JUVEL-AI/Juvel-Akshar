@@ -78,7 +78,8 @@ export default function Console({ data, demo, error, pinRequired = false, role =
   };
 
   useEffect(() => { const t = setInterval(() => setStage((s) => (s + 1) % 4), 2600); return () => clearInterval(t); }, []);
-  useEffect(() => { if (demo) return; const t = setInterval(() => router.refresh(), 15000); return () => clearInterval(t); }, [demo, router]);
+  const liveNow = (data.live ?? []).filter((l) => campus === "all" || l.campus === campus);
+  useEffect(() => { if (demo) return; const t = setInterval(() => router.refresh(), liveNow.length ? 5000 : 15000); return () => clearInterval(t); }, [demo, router, liveNow.length]);
 
   const label = (k: string) => data.campuses[k] ?? (k ? k : "Campus unknown");
   const inCampus = useMemo(() => data.leads.filter((l) => campus === "all" || l.campus === campus), [data, campus]);
@@ -234,6 +235,20 @@ export default function Console({ data, demo, error, pinRequired = false, role =
           </button>
         ))}
       </nav>
+
+      {liveNow.length > 0 && (
+        <section className="card" aria-label="Calls on the line now" style={{ borderColor: "#3DDC97", marginBottom: 14 }}>
+          <h2 style={{ color: "#3DDC97", marginBottom: 8 }}>On the line now</h2>
+          {liveNow.map((l) => (
+            <div key={l.id} style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "baseline", padding: "6px 0", fontSize: 17 }}>
+              <b>{l.parent || "Parent"}</b>
+              <span>Student: <b>{l.student || "-"}</b></span>
+              <span>Class: <b>{l.class || "-"}</b></span>
+              <span className="sub">{data.campuses[l.campus] ?? l.campus} · called {l.since}{l.attempt > 1 ? ` · attempt ${l.attempt}` : ""}</span>
+            </div>
+          ))}
+        </section>
+      )}
 
       <section className="kpis">
         {kpis.map((k) => (

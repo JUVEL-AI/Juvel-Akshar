@@ -4,6 +4,7 @@ from collections import Counter
 from datetime import datetime, timedelta
 
 from . import ops
+from .models import Status
 from .store import parse
 
 
@@ -63,7 +64,15 @@ def build(engine, now: datetime, day: str | None = None, test: bool = False) -> 
     hours = Counter(int(l["time"][:2]) for l in fresh)
     attention = [l for l in leads if l["status"] in
                  ("ANSWERED_NOT_TRANSFERRED", "NEEDS_REVIEW", "NO_RESPONSE", "INVALID_PHONE", "STALE")]
+    live = []
+    if not test:                      # calls on the line right now: who the counselor is about to speak to
+        for r in store.q("SELECT * FROM leads WHERE source<>'test' AND status=? AND updated_at>=? ORDER BY updated_at DESC",
+                         (Status.CALLING.value, iso(now - timedelta(minutes=10)))):
+            live.append({"id": r["id"], "parent": r["name"] or "", "student": r["student_name"] or "", "class": r["grade"] or "",
+                         "campus": r["campus"] or "", "attempt": r["attempts"],
+                         "since": parse(r["updated_at"]).astimezone(cfg.tz).strftime("%H:%M")})
     return {
+        "live": live,
         "generated_at": now.isoformat(), "day": day_start.date().isoformat(), "control": engine.control_info(),
         "records_staff": bool(ops._stored(engine).get("records_staff", False)),
         "hours_label": ops.hours_label(cfg.calling),
