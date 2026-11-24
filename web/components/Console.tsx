@@ -11,7 +11,7 @@ const META: Record<string, { label: string; tone: string; bg: string; group: str
   RETRY: { label: "Retrying", tone: "#FFB547", bg: "rgba(255,181,71,.14)", group: "retry" },
   CALLING: { label: "Calling now", tone: "#3DDC97", bg: "rgba(61,220,151,.14)", group: "retry" },
   QUEUED: { label: "Waiting to call", tone: "#8FA1B5", bg: "rgba(143,161,181,.12)", group: "retry" },
-  NO_RESPONSE: { label: "No response", tone: "#C4D0DD", bg: "rgba(143,161,181,.16)", group: "callback" },
+  NO_RESPONSE: { label: "No response", tone: "#C4D0DD", bg: "rgba(143,161,181,.16)", group: "noresp" },
   NEEDS_REVIEW: { label: "Needs review", tone: "#6AA7FF", bg: "rgba(106,167,255,.15)", group: "review" },
   INVALID_PHONE: { label: "Bad phone number", tone: "#6AA7FF", bg: "rgba(106,167,255,.15)", group: "review" },
   STALE: { label: "Too old to call", tone: "#6AA7FF", bg: "rgba(106,167,255,.15)", group: "review" },
@@ -124,24 +124,6 @@ export default function Console({ data, demo, error, pinRequired = false, role =
     const j = await r.json().catch(() => ({}));
     if (!r.ok) { setLeadMsg(j.error || "Could not do that"); return; }
     if (kind === "delete") setPicked(null);
-    router.refresh();
-  };
-  const [recallMsg, setRecallMsg] = useState("");
-  const recallWaiting = data.recall?.waiting ?? 0;
-  const recall = async (ids: number[]) => {
-    if (demo || !ids.length) return;
-    if (!window.confirm(ids.length === 1 ? "Call this parent back now? They hear the greeting and are then connected to the counselor."
-      : `Call back ${ids.length} parents, one at a time? Each parent hears the greeting and is connected to the counselor. The next call starts only when the previous one has ended, so keep your phone free.`)) return;
-    setRecallMsg("");
-    const r = await fetch("/api/recall", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) });
-    const j = await r.json().catch(() => ({}));
-    setRecallMsg(r.ok ? (j.queued ? `${j.queued} parent${j.queued > 1 ? "s" : ""} added. ${j.waiting} still waiting.` : "Nothing to call back (already queued, not allowed, or the number is blocked).") : (j.error || "Could not start"));
-    router.refresh();
-  };
-  const recallCancel = async () => {
-    if (demo || !window.confirm("Stop the call-back list? Calls already started will finish.")) return;
-    await fetch("/api/recall", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "cancel" }) });
-    setRecallMsg("Call-back list cleared.");
     router.refresh();
   };
   const sendControl = async () => {
@@ -260,9 +242,9 @@ export default function Console({ data, demo, error, pinRequired = false, role =
           {liveNow.map((l) => (
             <div key={l.id} style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "baseline", padding: "6px 0", fontSize: 17 }}>
               <b>{l.parent || "Parent"}</b>
-              <span>From <b>{l.source || "enquiry"}</b></span>
-              {Object.keys(data.campuses).length > 1 && <span className="sub">{data.campuses[l.campus] ?? l.campus}</span>}
-              <span className="sub">called {l.since}</span>
+              <span>Student: <b>{l.student || "-"}</b></span>
+              <span>Class: <b>{l.class || "-"}</b></span>
+              <span className="sub">{data.campuses[l.campus] ?? l.campus} · called {l.since}{l.attempt > 1 ? ` · attempt ${l.attempt}` : ""}</span>
             </div>
           ))}
         </section>
@@ -311,12 +293,6 @@ export default function Console({ data, demo, error, pinRequired = false, role =
             <div className="fchips">
               {FILTERS.map(([k, name]) => <button key={k} type="button" className="fchip" aria-pressed={filter === k} onClick={() => setFilter(k)}>{name}</button>)}
             </div>
-            {filter === "callback" && !demo && (
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", padding: "6px 18px 10px" }}>
-                <button type="button" className="fchip" disabled={!rows.length} onClick={() => recall(rows.map((l) => l.id))}>📞 Call back all {rows.length}, one by one</button>
-                {recallWaiting > 0 && <button type="button" className="fchip" onClick={recallCancel}>■ Stop the list ({recallWaiting} waiting)</button>}
-                {recallMsg && <span className="sub" role="status">{recallMsg}</span>}
-              </div>)}
             <div className="scroll"><div className="t-in">
               <div className="cols th"><span>Time</span><span>Parent / student</span><span>Campus · class</span><span>First call</span><span>Status</span><span>Attempts</span></div>
               {rows.map((l) => {
@@ -342,10 +318,6 @@ export default function Console({ data, demo, error, pinRequired = false, role =
                 <div><div className="eyebrow">Selected enquiry</div>
                   <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4 }}>{sel.parent || "—"}</div>
                   <div className="mono sub" style={{ marginTop: 2 }}>{sel.phone} · {label(sel.campus)}</div>
-                  {!demo && (sel.status === "ANSWERED_NOT_TRANSFERRED" || sel.status === "NO_RESPONSE") && (
-                    <div style={{ marginTop: 10 }}>
-                      <button type="button" className="fchip" onClick={() => recall([sel.id])}>📞 Call back</button>
-                    </div>)}
                   {admin && !demo && (
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
                       <button type="button" className="fchip" onClick={() => leadAction(sel.id, "call")}>📞 Call now</button>

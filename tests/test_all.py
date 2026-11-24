@@ -1077,34 +1077,3 @@ def test_dashboard_shows_who_is_on_the_line_now():
     out = console.build(e, MON_10AM)
     assert [x["student"] for x in out["live"]] == ["Riya"]
     assert console.build(e, MON_10AM + timedelta(minutes=30))["live"] == []     # a stuck 'calling' row does not show forever
-
-
-def test_search_can_be_limited_to_one_campus_and_live_shows_source():
-    from juvelcall import console, ops
-    e, s, d, n = mk()
-    e.ingest([lead("a", phone="9876546001", campus="ecr_campus"), lead("b", phone="9876546002", campus="tng")], MON_10AM)
-    assert len(ops.search(e, "asha")) == 2
-    only = ops.search(e, "asha", campus="ecr")
-    assert len(only) == 1 and only[0]["campus"] == "ECR"
-    e.tick(MON_10AM)
-    assert all("source" in x for x in console.build(e, MON_10AM)["live"])
-
-
-def test_call_backs_go_one_at_a_time():
-    e, s, d, n = mk()
-    ids = []
-    for i in range(3):
-        e.ingest([lead(f"cb{i}", phone=f"98765470{i:02d}")], MON_10AM)
-    for r in s.q("SELECT id FROM leads"):
-        s.x("UPDATE leads SET status='ANSWERED_NOT_TRANSFERRED' WHERE id=?", (r["id"],))
-        ids.append(r["id"])
-    res = e.recall(ids, MON_10AM, "vidya")
-    assert res["queued"] == 3 and res["started"] == 1 and res["waiting"] == 2
-    assert len(d.calls) == 1                                   # the other two wait
-    assert e.tick(MON_10AM + timedelta(seconds=30)) == []      # first call still in progress
-    first = s.one("SELECT id FROM leads WHERE status='CALLING'")["id"]
-    s.x("UPDATE leads SET status='TRANSFERRED' WHERE id=?", (first,))   # the call ended
-    assert len(e.tick(MON_10AM + timedelta(seconds=60))) == 1
-    assert e.recall_cancel(MON_10AM + timedelta(seconds=61), "vidya") == 1
-    s.x("UPDATE leads SET status='TRANSFERRED' WHERE status='CALLING'")
-    assert e.tick(MON_10AM + timedelta(seconds=90)) == []

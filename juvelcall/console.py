@@ -14,17 +14,6 @@ def mask(phone: str | None) -> str:
     return f"{phone[:3]} {phone[3:5]}••• ••{phone[-3:]}"
 
 
-def source_label(engine, source: str) -> str:
-    """Short, plain name of where an enquiry came from (Meta, Google Ads, Website)."""
-    from . import sheets_admin
-    name = {("sheet_" + s["id"]): s["label"] for s in sheets_admin.configured(engine)}.get(source, source or "")
-    low = name.lower()
-    for key, out in (("google", "Google Ads"), ("meta", "Meta"), ("website", "Website"), ("sm lead", "Website")):
-        if key in low:
-            return out
-    return {"webhook": "Webhook", "test": "Test"}.get(source, name)
-
-
 def build(engine, now: datetime, day: str | None = None, test: bool = False) -> dict:
     cfg, store = engine.cfg, engine.store
     local_now = now.astimezone(cfg.tz)
@@ -61,7 +50,7 @@ def build(engine, now: datetime, day: str | None = None, test: bool = False) -> 
             first = max(0, int((parse(c["first_at"]) - created).total_seconds()))
         older = bool(not test and r["allow_old"] and not (day_start <= created.astimezone(cfg.tz) < day_end))
         leads.append({
-            "id": r["id"], "older": older, "source": source_label(engine, r["source"]),
+            "id": r["id"], "older": older,
             "time": created.astimezone(cfg.tz).strftime("%d %b" if older else "%H:%M"),
             "parent": r["name"] or "", "student": r["student_name"] or "", "class": r["grade"] or "",
             "campus": r["campus"] or "", "phone": mask(r["phone"]), "status": r["status"],
@@ -79,11 +68,10 @@ def build(engine, now: datetime, day: str | None = None, test: bool = False) -> 
     if not test:                      # calls on the line right now: who the counselor is about to speak to
         for r in store.q("SELECT * FROM leads WHERE source<>'test' AND status=? AND updated_at>=? ORDER BY updated_at DESC",
                          (Status.CALLING.value, iso(now - timedelta(minutes=10)))):
-            live.append({"id": r["id"], "source": source_label(engine, r["source"]), "parent": r["name"] or "", "student": r["student_name"] or "", "class": r["grade"] or "",
+            live.append({"id": r["id"], "parent": r["name"] or "", "student": r["student_name"] or "", "class": r["grade"] or "",
                          "campus": r["campus"] or "", "attempt": r["attempts"],
                          "since": parse(r["updated_at"]).astimezone(cfg.tz).strftime("%H:%M")})
     return {
-        "recall": {"waiting": len(engine._recall_queue())},
         "live": live,
         "generated_at": now.isoformat(), "day": day_start.date().isoformat(), "control": engine.control_info(),
         "records_staff": bool(ops._stored(engine).get("records_staff", False)),
