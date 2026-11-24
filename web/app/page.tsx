@@ -22,6 +22,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ d
     data.live = (data.live ?? []).filter((l) => l.campus === only);
     data.campuses = Object.fromEntries(Object.entries(data.campuses).filter(([k]) => k === only));
     data.campus_status = Object.fromEntries(Object.entries(data.campus_status ?? {}).filter(([k]) => k === only));
+    if (data.control?.campuses) data.control = { ...data.control, campuses: Object.fromEntries(Object.entries(data.control.campuses).filter(([k]) => k === only)) };
     data.kpis = undefined; data.outcomes = undefined; data.by_hour = undefined;
   }
   return <Console data={data} demo={demo} error={error} pinRequired={!!process.env.CONTROL_PIN} role={who.role} user={who.user} day={safeDay} />;

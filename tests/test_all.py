@@ -1108,3 +1108,22 @@ def test_call_backs_go_one_at_a_time():
     assert e.recall_cancel(MON_10AM + timedelta(seconds=61), "vidya") == 1
     s.x("UPDATE leads SET status='TRANSFERRED' WHERE status='CALLING'")
     assert e.tick(MON_10AM + timedelta(seconds=90)) == []
+
+
+def test_each_campus_has_its_own_start_pause_stop():
+    e, s, d, n = mk()
+    e.ingest([lead("ecr1", phone="9876547001", campus="ecr_campus"), lead("tng1", phone="9876547002", campus="tng")], MON_10AM)
+    e.set_campus_control("t_nagar", "pause", MON_10AM, "viji")
+    e.tick(MON_10AM)
+    st = lambda k: s.one("SELECT status FROM leads WHERE key=?", (k,))["status"]
+    assert st("ecr1") != "QUEUED" and st("tng1") == "QUEUED"             # ECR called, T Nagar waits
+    assert e.control_info()["campuses"]["t_nagar"]["state"] == "paused" and e.control_info()["campuses"]["ecr"]["state"] == "running"
+    e.set_campus_control("t_nagar", "start", MON_10AM + timedelta(minutes=1), "viji")
+    e.tick(MON_10AM + timedelta(minutes=1))
+    assert st("tng1") != "QUEUED"
+    e.set_campus_control("ecr", "stop", MON_10AM + timedelta(minutes=2), "vidya")
+    e.ingest([lead("ecr2", phone="9876547003", campus="ecr_campus", at=MON_10AM + timedelta(minutes=2))], MON_10AM + timedelta(minutes=2))
+    assert st("ecr2") == "NEEDS_REVIEW"
+    assert e.can_call("t_nagar") and not e.can_call("ecr")
+    e.set_control("pause", MON_10AM + timedelta(minutes=3), "priya")           # the master switch overrides every campus
+    assert not e.can_call("t_nagar")

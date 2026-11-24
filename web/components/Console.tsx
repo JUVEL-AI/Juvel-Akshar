@@ -62,7 +62,10 @@ export default function Console({ data, demo, error, pinRequired = false, role =
   const [pin, setPin] = useState("");
   const [busy, setBusy] = useState(false);
   const [ctlErr, setCtlErr] = useState("");
+  const [askCampus, setAskCampus] = useState("");                    // "" = the master switch for the whole school
   const ctl = data.control?.state ?? "running";
+  const isAdm = role === "admin" || role === "super";
+  const askLabel = askCampus ? (data.campuses[askCampus] ?? askCampus) : "";
   const [q, setQ] = useState("");
   const [found, setFound] = useState<{ id: number; when: string; parent: string; student: string; class: string; campus: string; phone: string; status: string; attempts: number; note: string }[] | null>(null);
   useEffect(() => {
@@ -149,7 +152,7 @@ export default function Console({ data, demo, error, pinRequired = false, role =
     if (demo) { setAsk(null); return; }
     setBusy(true); setCtlErr("");
     try {
-      const r = await fetch("/api/control", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: ask, pin }) });
+      const r = await fetch("/api/control", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: ask, pin, ...(askCampus ? { campus: askCampus } : {}) }) });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) { setCtlErr(j.error || "Could not change the setting. Try again."); setBusy(false); return; }
       setAsk(null); setPin(""); router.refresh();
@@ -179,7 +182,7 @@ export default function Console({ data, demo, error, pinRequired = false, role =
         </div>
       </header>
 
-      <section className={`ctl ${ctl}`} aria-label="Calling control">
+      {isAdm && (<section className={`ctl ${ctl}`} aria-label="Calling control">
         <div className="ctl-state">
           <span className="ctl-dot" />
           <div>
@@ -192,20 +195,42 @@ export default function Console({ data, demo, error, pinRequired = false, role =
           </div>
         </div>
         <div className="ctl-btns">
-          <button type="button" className="cbtn go" disabled={ctl === "running"} onClick={() => { setCtlErr(""); setAsk("start"); }}>▶ Start</button>
-          <button type="button" className="cbtn pause" disabled={ctl !== "running"} onClick={() => { setCtlErr(""); setAsk("pause"); }}>⏸ Pause</button>
-          <button type="button" className="cbtn stop" disabled={ctl === "stopped"} onClick={() => { setCtlErr(""); setAsk("stop"); }}>⏹ Stop</button>
+          <button type="button" className="cbtn go" disabled={ctl === "running"} onClick={() => { setCtlErr(""); setAskCampus(""); setAsk("start"); }}>▶ Start</button>
+          <button type="button" className="cbtn pause" disabled={ctl !== "running"} onClick={() => { setCtlErr(""); setAskCampus(""); setAsk("pause"); }}>⏸ Pause</button>
+          <button type="button" className="cbtn stop" disabled={ctl === "stopped"} onClick={() => { setCtlErr(""); setAskCampus(""); setAsk("stop"); }}>⏹ Stop</button>
         </div>
-      </section>
+      </section>)}
+
+      {Object.entries(data.campuses).map(([k, name]) => {
+        const cs = data.control?.campuses?.[k]?.state ?? "running";
+        const eff = ctl !== "running" ? ctl : cs;
+        const open = (a: "start" | "pause" | "stop") => { setCtlErr(""); setAskCampus(k); setAsk(a); };
+        return (
+          <section key={k} className={`ctl ${eff}`} aria-label={`Calling control for ${name}`}>
+            <div className="ctl-state">
+              <span className="ctl-dot" />
+              <div>
+                <b>{name}: {eff === "running" ? "calling is ON" : eff === "paused" ? "calling is PAUSED" : "calling is STOPPED"}</b>
+                <div className="sub">{ctl !== "running" ? `The whole school is ${ctl === "paused" ? "paused" : "stopped"} by an admin.` : cs === "running" ? "New enquiries for this campus are called within minutes, inside calling hours." : cs === "paused" ? "No calls for this campus. Enquiries are saved and called when you press Start." : "No calls for this campus. Waiting enquiries were moved to Needs review."}</div>
+              </div>
+            </div>
+            <div className="ctl-btns">
+              <button type="button" className="cbtn go" disabled={cs === "running"} onClick={() => open("start")}>▶ Start</button>
+              <button type="button" className="cbtn pause" disabled={cs !== "running"} onClick={() => open("pause")}>⏸ Pause</button>
+              <button type="button" className="cbtn stop" disabled={cs === "stopped"} onClick={() => open("stop")}>⏹ Stop</button>
+            </div>
+          </section>
+        );
+      })}
 
       {ask && (
         <div className="modal-bg" role="dialog" aria-modal="true" aria-label="Confirm" onClick={() => !busy && setAsk(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>{ask === "start" ? "Start calling?" : ask === "pause" ? "Pause calling?" : "Stop calling?"}</h2>
+            <h2>{ask === "start" ? "Start calling" : ask === "pause" ? "Pause calling" : "Stop calling"}{askLabel ? ` for ${askLabel}` : ""}?</h2>
             <p>
               {ask === "start" && "Calls go out again. Enquiries that arrived while paused are called now (anything older than 48 hours is skipped)."}
               {ask === "pause" && "No new calls will start. Calls already ringing finish normally. Enquiries are still saved and called when you press Start."}
-              {ask === "stop" && "No new calls will start, and every enquiry waiting to be called is moved to Needs review for your team to call by hand. Calls already ringing finish normally. New enquiries are also parked until you press Start."}
+              {ask === "stop" && "No new calls will start" + (askLabel ? " for this campus" : "") + ", and every enquiry waiting to be called is moved to Needs review for your team to call by hand. Calls already ringing finish normally. New enquiries are also parked until you press Start."}
             </p>
             {pinRequired && <label className="pin">PIN<input type="password" inputMode="numeric" autoComplete="off" value={pin} onChange={(e) => setPin(e.target.value)} /></label>}
             {ctlErr && <div className="err">{ctlErr}</div>}

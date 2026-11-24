@@ -189,6 +189,10 @@ def create_app(engine: Engine, clock=now_utc, run_loop: bool = False, loop_secon
     def api_control_set(payload: dict, x_webhook_secret: str | None = Header(default=None)):
         auth(x_webhook_secret)
         try:
+            campus = str(payload.get("campus") or "")
+            if campus:                       # one campus's own start / pause / stop
+                return engine.set_campus_control(campus, str(payload.get("action", "")).lower(), clock(),
+                                                 str(payload.get("by") or "dashboard")[:40])
             return engine.set_control(str(payload.get("action", "")).lower(), clock(),
                                       str(payload.get("by") or "dashboard")[:40])
         except ValueError as e:

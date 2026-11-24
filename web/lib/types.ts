@@ -8,5 +8,5 @@ export type ConsoleData = {
   live?: Live[]; recall?: { waiting: number };
   generated_at: string; day: string; campuses: Record<string, string>;
   leads: Lead[]; hours_label?: string; records_staff?: boolean; records_hidden?: boolean;
-  campus_status?: Record<string, { label: string; on_duty: string | null; counselors: { name: string; number: string; on_duty: boolean }[] }>; control?: { state: "running" | "paused" | "stopped"; changed_at: string; by: string }; kpis?: Record<string, number>; outcomes?: Record<string, number>; by_hour?: Record<string, number>;
+  campus_status?: Record<string, { label: string; on_duty: string | null; counselors: { name: string; number: string; on_duty: boolean }[] }>; control?: { state: "running" | "paused" | "stopped"; changed_at: string; by: string; campuses?: Record<string, { state: "running" | "paused" | "stopped"; changed_at: string; by: string }> }; kpis?: Record<string, number>; outcomes?: Record<string, number>; by_hour?: Record<string, number>;
 };

@@ -49,9 +49,50 @@ class Engine:
         v = self.store.kv_get("control")
         return v if v in self.CONTROL_LABEL else "running"
 
+    def campus_state(self, campus: str) -> str:
+        """One campus's own switch. Calls for a campus go out only if the master switch AND this switch are running."""
+        v = self.store.kv_get(f"control_{campus}")
+        return v if v in self.CONTROL_LABEL else "running"
+
+    def can_call(self, campus: str) -> bool:
+        return self.control_state() == "running" and self.campus_state(campus) == "running"
+
     def control_info(self) -> dict:
         return {"state": self.control_state(), "changed_at": self.store.kv_get("control_changed_at") or "",
-                "by": self.store.kv_get("control_by") or ""}
+                "by": self.store.kv_get("control_by") or "",
+                "campuses": {k: {"state": self.campus_state(k), "changed_at": self.store.kv_get(f"control_{k}_at") or "",
+                                "by": self.store.kv_get(f"control_{k}_by") or ""} for k in self.cfg.campuses}}
+
+    def set_campus_control(self, campus: str, action: str, now: datetime, who: str = "dashboard") -> dict:
+        """Start / pause / stop for ONE campus. Same meaning as the master switch, but only that campus's enquiries are affected."""
+        new = {"start": "running", "pause": "paused", "stop": "stopped"}.get(action)
+        if new is None:
+            raise ValueError("action must be start, pause or stop")
+        if campus not in self.cfg.campuses:
+            raise ValueError("unknown campus")
+        old = self.campus_state(campus)
+        parked = 0
+        if new == "stopped":
+            for r in self.store.q("SELECT id FROM leads WHERE source<>'test' AND campus=? AND status IN (?,?)",
+                                  (campus, Status.QUEUED.value, Status.RETRY.value)):
+                self.store.update_lead(r["id"], now, status=Status.NEEDS_REVIEW.value, next_attempt_at=None,
+                                       note="calling was stopped for this campus; please follow up by hand")
+                parked += 1
+        if new == "running" and old != "running":
+            self.store.x("UPDATE leads SET next_attempt_at=? WHERE campus=? AND status IN (?,?) AND next_attempt_at>?",
+                         (iso(now), campus, Status.QUEUED.value, Status.RETRY.value, iso(now)))
+        self.store.kv_set(f"control_{campus}", new)
+        self.store.kv_set(f"control_{campus}_at", iso(now))
+        self.store.kv_set(f"control_{campus}_by", who)
+        label = self.cfg.campuses[campus]["label"]
+        self.store.add_audit(now, who, f"calling_{new}_{campus}", f"{label}: {old} -> {new}" + (f", parked {parked}" if parked else ""))
+        if new != old:
+            extra = f" {parked} waiting enquiries were moved to Needs review." if parked else ""
+            self._alert(now, f"control_{campus}_{new}", None, f"Calling {self.CONTROL_LABEL[new].lower()} for {label} ({who})",
+                        f"Automatic calling for the {label} campus is now {self.CONTROL_LABEL[new].upper()}, set by {who} at "
+                        f"{now.astimezone(self.cfg.tz):%d %b %H:%M}.{extra}",
+                        to=self.cfg.notifications.get("control_emails") or None)
+        return self.control_info() | {"parked": parked}
 
     def set_control(self, action: str, now: datetime, who: str = "dashboard") -> dict:
         """start = calls go out.  pause = no new calls; enquiries still saved and queued, called on start.
@@ -150,7 +191,7 @@ class Engine:
             status, note = Status.NEEDS_REVIEW, f"unknown campus '{lead.campus}'"
         elif not catch_up and now - lead.created_at > timedelta(hours=self.c["stale_after_hours"]):
             status, note = Status.STALE, "lead too old for automatic call"
-        elif self.control_state() == "stopped":
+        elif self.control_state() == "stopped" or self.campus_state(campus) == "stopped":
             status, note = Status.NEEDS_REVIEW, "arrived while calling was stopped; please follow up by hand"
         else:
             next_at = next_open(max(now, lead.created_at), self.c, self.cfg.tz)
@@ -198,6 +239,8 @@ class Engine:
                 self.store.update_lead(r["id"], now, status=Status.STALE.value, next_attempt_at=None,
                                        note="waited too long (calling was paused or the system was down)")
                 continue
+            if self.campus_state(r["campus"]) != "running":
+                continue                 # this campus is paused or stopped: its leads wait
             forced = self.store.kv_get(f"force_{r['id']}") is not None
             if not forced and not in_hours(now, self.c, self.cfg.tz):
                 self.store.update_lead(r["id"], now, next_attempt_at=iso(next_open(now, self.c, self.cfg.tz)))
@@ -379,6 +422,8 @@ class Engine:
         for r in (self.store.q("SELECT * FROM leads WHERE status=? AND alerted_not_called=0", (Status.QUEUED.value,))
                   if running else []):
             due = parse(r["next_attempt_at"])
+            if self.campus_state(r["campus"]) != "running":
+                continue
             if due and now - due > limit and in_hours(now, self.c, self.cfg.tz):
                 self.store.update_lead(r["id"], now, alerted_not_called=1)
                 self._alert(now, "not_called", r["id"], "Inquiry received but no call was placed",
@@ -419,8 +464,8 @@ class Engine:
             return "This enquiry has no valid phone number or campus"
         if self.store.is_dnc(r["phone"]):
             return "This number is on the do-not-call list"
-        if self.control_state() != "running":
-            return "Calling is paused or stopped. Press Start first"
+        if not self.can_call(r["campus"]):
+            return "Calling is paused or stopped (for the school or this campus). Press Start first"
         self.store.update_lead(lead_id, now, status=Status.QUEUED.value, attempts=0, next_attempt_at=iso(now),
                                note=f"call started by {who or 'an admin'}")
         self.store.kv_set(f"force_{lead_id}", iso(now))
@@ -450,7 +495,8 @@ class Engine:
         for i in ids:
             r = self.store.one("SELECT * FROM leads WHERE id=?", (int(i),))
             if (not r or r["status"] not in self.RECALL_OK or not r["phone"] or not r["campus"]
-                    or self.store.is_dnc(r["phone"]) or (campus and r["campus"] != campus) or r["id"] in q):
+                    or self.store.is_dnc(r["phone"]) or (campus and r["campus"] != campus) or r["id"] in q
+                    or self.campus_state(r["campus"]) != "running"):
                 continue
             q.append(r["id"])
             added += 1
@@ -482,8 +528,8 @@ class Engine:
             if not r or r["status"] not in self.RECALL_OK or not r["phone"] or self.store.is_dnc(r["phone"]):
                 q.pop(0)
                 continue
-            if not self._on_duty(r["campus"]):
-                break                                       # nobody on duty: wait
+            if not self._on_duty(r["campus"]) or self.campus_state(r["campus"]) != "running":
+                break                                       # nobody on duty, or this campus is paused: wait
             q.pop(0)
             self.store.update_lead(lid, now, status=Status.QUEUED.value, attempts=0, next_attempt_at=iso(now),
                                    note="call back started from the dashboard")
