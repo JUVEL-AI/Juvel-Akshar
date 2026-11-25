@@ -14,7 +14,7 @@ def mask(phone: str | None) -> str:
     return f"{phone[:3]} {phone[3:5]}••• ••{phone[-3:]}"
 
 
-LINGER_SECONDS = 150      # a call stays on the calling card this long after it ends
+LINGER_SECONDS = 60      # a call stays on the calling card this long after it ends
 NEXT_SECONDS = 120        # a call is announced on the card this long before it is placed
 
 
@@ -108,7 +108,7 @@ def build(engine, now: datetime, day: str | None = None, test: bool = False) -> 
         def card(r, phase):
             return {"id": r["id"], "phase": phase, "status": r["status"], "source": source_label(labels, r["source"]),
                     "parent": r["name"] or "", "student": r["student_name"] or "", "class": r["grade"] or "",
-                    "campus": r["campus"] or "", "attempt": r["attempts"],
+                    "campus": r["campus"] or "", "attempt": r["attempts"], "last4": (r["phone"] or "")[-4:],
                     "since": parse(r["updated_at"]).astimezone(cfg.tz).strftime("%H:%M")}
         for r in store.q("SELECT * FROM leads WHERE source<>'test' AND status=? AND updated_at>=? ORDER BY updated_at DESC",
                          (Status.CALLING.value, iso(now - timedelta(minutes=10)))):

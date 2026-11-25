@@ -238,7 +238,7 @@ class Engine:
             return placed
         placed += self._advance_recall(now)
         rows = self.store.q(
-            "SELECT * FROM leads WHERE source<>'test' AND status IN (?,?) AND next_attempt_at<=? ORDER BY next_attempt_at LIMIT ?",
+            "SELECT * FROM leads WHERE source<>'test' AND status IN (?,?) AND next_attempt_at<=? ORDER BY allow_old, next_attempt_at LIMIT ?",
             (Status.QUEUED.value, Status.RETRY.value, iso(now), limit))
         pace = int(self.c.get("backfill_per_minute", 3) or 3)       # older enquiries (start-date catch-up) go out a few a minute
         caught_up = self.store.one(                       # older-enquiry calls already placed in the last 60 s (every webhook also runs a tick)
@@ -246,13 +246,13 @@ class Engine:
             (iso(now - timedelta(seconds=60)),))["n"]
         inflight = {x["campus"]: x["n"] for x in self.store.q(     # calls on the line per campus (one counselor takes one parent at a time)
             "SELECT campus, COUNT(*) n FROM leads WHERE source<>'test' AND status=? AND updated_at>? GROUP BY campus",
-            (Status.CALLING.value, iso(now - timedelta(minutes=4))))}
+            (Status.CALLING.value, iso(now - timedelta(minutes=3))))}
         for r in rows:
             made = parse(r["created_at"])
             if r["allow_old"] and caught_up >= pace:
                 continue
-            if r["allow_old"] and self.c.get("backfill_one_at_a_time", True) and inflight.get(r["campus"], 0) >= 1:
-                continue                 # older enquiries wait until this campus's line is free, so a transfer is never refused as 'busy'
+            if self.c.get("one_call_per_campus", True) and inflight.get(r["campus"], 0) >= 1:
+                continue                 # the next parent waits until this campus's current call has finished (new enquiries go before older ones)
             if (made and not r["allow_old"] and now - made > timedelta(hours=self.c["stale_after_hours"])
                     and self.store.kv_get(f"force_{r['id']}") is None):
                 self.store.update_lead(r["id"], now, status=Status.STALE.value, next_attempt_at=None,

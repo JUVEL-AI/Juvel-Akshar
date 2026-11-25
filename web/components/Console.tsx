@@ -292,9 +292,10 @@ export default function Console({ data, demo, error, pinRequired = false, role =
             const tag = l.phase === "next" ? { t: "Calling next", c: "#FFB547" } : l.phase === "recent" ? { t: meta(l.status ?? "").label, c: "#8FA1B5" } : { t: "On the line", c: "#3DDC97" };
             return (
               <button key={`${l.phase}-${l.id}`} type="button" onClick={() => setPicked(l.id)}
-                style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "baseline", padding: "6px 0", fontSize: 17, width: "100%", textAlign: "left", background: "none", border: 0, color: "inherit", cursor: "pointer" }}>
+                style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "baseline", padding: l.phase === "calling" ? "12px 10px" : "4px 0", fontSize: l.phase === "calling" ? 19 : 14, opacity: l.phase === "calling" ? 1 : 0.75, width: "100%", textAlign: "left", background: l.phase === "calling" ? "rgba(61,220,151,.12)" : "none", borderRadius: 8, border: 0, color: "inherit", cursor: "pointer" }}>
                 <span className="pill" style={{ color: tag.c, background: "rgba(255,255,255,.06)" }}>{tag.t}</span>
-                <b>{l.parent || "Parent"}</b>
+                <b style={l.phase === "calling" ? { fontSize: 24 } : undefined}>{l.parent || "Parent"}</b>
+                {l.last4 && <span className="sub">••• {l.last4}</span>}
                 <span>From <b>{l.source || "enquiry"}</b></span>
                 {Object.keys(data.campuses).length > 1 && <span className="sub">{data.campuses[l.campus] ?? l.campus}</span>}
                 <span className="sub">{l.phase === "next" ? "due within about a minute" : `called ${l.since}`}</span>

@@ -1186,3 +1186,14 @@ def test_campus_switches_cost_one_query_and_big_ranges_finish_over_several_minut
     e.ingest([lead(f"r{i}", phone=f"98765510{i:02d}", at=MON_10AM - timedelta(days=5)) for i in range(5)], MON_10AM, baseline=True)
     out = e.revive_range("t", datetime(2026, 10, 1, tzinfo=e.cfg.tz), datetime(2026, 10, 30, tzinfo=e.cfg.tz), MON_10AM, deadline=time.monotonic() - 1)
     assert out.get("partial") and out["queued"] == 0
+
+
+def test_new_enquiries_also_wait_for_the_campus_line_and_go_before_older_ones():
+    from datetime import datetime
+    e, s, d, n = mk()
+    e.ingest([lead(f"n{i}", phone=f"98765520{i:02d}", at=MON_10AM, campus="tng") for i in range(3)], MON_10AM)
+    assert len(e.tick(MON_10AM)) == 1                                  # three new enquiries, one call at a time
+    assert len(e.tick(MON_10AM + timedelta(seconds=30))) == 0
+    first = s.one("SELECT id FROM leads WHERE status='CALLING'")["id"]
+    e.resolve(first, MON_10AM + timedelta(seconds=40), "x", "t")
+    assert len(e.tick(MON_10AM + timedelta(seconds=45))) == 1
