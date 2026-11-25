@@ -656,6 +656,28 @@ class Engine:
         self.store.add_audit(now, who, "mark_done", f"lead {lead_id}")
         return True
 
+    OUTCOMES = {"admitted": "Admitted", "not_admitted": "Not admitted", "interested": "Interested, follow up", "dnd": "Do not disturb"}
+
+    def set_outcome(self, lead_id: int, now: datetime, outcome: str, who: str = "") -> str | None:
+        """A counselor records how the conversation ended. Calling stops for this enquiry; 'Do not disturb' also puts the
+        number on the do-not-call list. Returns an error message, or None when saved."""
+        if outcome not in self.OUTCOMES:
+            return "Unknown outcome"
+        r = self.store.one("SELECT status, phone FROM leads WHERE id=?", (lead_id,))
+        if not r:
+            return "No such enquiry"
+        if r["status"] == Status.CALLING.value:
+            return "A call to this parent is in progress"
+        note = f"{self.OUTCOMES[outcome]} (marked by {who or 'a counselor'})"
+        status = Status.RESOLVED.value
+        if outcome == "dnd":
+            status = Status.DO_NOT_CALL.value
+            if r["phone"]:
+                self.store.add_dnc(r["phone"], now, f"asked not to be disturbed (marked by {who or 'a counselor'})")
+        self.store.update_lead(lead_id, now, status=status, next_attempt_at=None, outcome=outcome, note=note[:300])
+        self.store.add_audit(now, who, "outcome", f"lead {lead_id}: {outcome}")
+        return None
+
     def report(self) -> dict:
         rows = self.store.q("SELECT status, COUNT(*) n FROM leads WHERE source<>'test' GROUP BY status")
         return {r["status"]: r["n"] for r in rows}

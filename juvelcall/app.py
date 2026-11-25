@@ -290,6 +290,17 @@ def create_app(engine: Engine, clock=now_utc, run_loop: bool = False, loop_secon
             raise HTTPException(404, "no such lead")
         return {"ok": True}
 
+    @app.post("/api/lead/{lead_id}/outcome")
+    def api_outcome(lead_id: int, payload: dict, x_webhook_secret: str | None = Header(default=None)):
+        auth(x_webhook_secret)
+        only = str(payload.get("campus", "") or "")                  # a campus-limited counselor may only mark their own campus's leads
+        if only and not engine.store.one("SELECT 1 FROM leads WHERE id=? AND campus=?", (lead_id, only)):
+            raise HTTPException(404, "no such lead")
+        err = engine.set_outcome(lead_id, clock(), str(payload.get("outcome", "")), str(payload.get("by", ""))[:40])
+        if err:
+            raise HTTPException(409 if "progress" in err else 400, err)
+        return {"ok": True}
+
     @app.post("/api/recall")
     def api_recall(payload: dict, x_webhook_secret: str | None = Header(default=None)):
         auth(x_webhook_secret)

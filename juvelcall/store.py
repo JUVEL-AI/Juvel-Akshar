@@ -73,6 +73,10 @@ class Store:
             self.db.execute("ALTER TABLE leads ADD COLUMN " + ("IF NOT EXISTS " if self.pg else "") + "allow_old INTEGER DEFAULT 0")
         except Exception:
             pass
+        try:                                                 # what the counselor recorded after speaking to the parent
+            self.db.execute("ALTER TABLE leads ADD COLUMN " + ("IF NOT EXISTS " if self.pg else "") + "outcome TEXT DEFAULT ''")
+        except Exception:
+            pass
         for col, typ in self.CALL_COLS.items():
             try:
                 if self.pg:

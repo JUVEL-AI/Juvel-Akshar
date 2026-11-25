@@ -1197,3 +1197,17 @@ def test_new_enquiries_also_wait_for_the_campus_line_and_go_before_older_ones():
     first = s.one("SELECT id FROM leads WHERE status='CALLING'")["id"]
     e.resolve(first, MON_10AM + timedelta(seconds=40), "x", "t")
     assert len(e.tick(MON_10AM + timedelta(seconds=45))) == 1
+
+
+def test_counselor_outcome_stops_calling_and_dnd_blocks_the_number():
+    e, s, d, n = mk()
+    e.ingest([lead(f"o{i}", phone=f"98765530{i:02d}", at=MON_10AM, campus="tng") for i in range(2)], MON_10AM)
+    ids = [r["id"] for r in s.q("SELECT id FROM leads ORDER BY id")]
+    assert e.set_outcome(ids[0], MON_10AM, "admitted", "viji") is None
+    a = s.one("SELECT status,outcome,next_attempt_at FROM leads WHERE id=?", (ids[0],))
+    assert a["status"] == "RESOLVED" and a["outcome"] == "admitted" and a["next_attempt_at"] is None
+    assert e.set_outcome(ids[1], MON_10AM, "dnd", "viji") is None
+    b = s.one("SELECT status,phone FROM leads WHERE id=?", (ids[1],))
+    assert b["status"] == "DO_NOT_CALL" and s.is_dnc(b["phone"])
+    assert e.set_outcome(ids[0], MON_10AM, "nonsense", "viji") == "Unknown outcome"
+    assert e.tick(MON_10AM) == []                                      # neither parent is called

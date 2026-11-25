@@ -1,7 +1,7 @@
 export type CallRec = { attempt: number; at: string; outcome: string; seconds: number | null; reason: string; recording: string; summary: string; transcript: string; detail: string };
 export type Lead = {
   id: number; time: string; parent: string; student: string; class: string; campus: string; phone: string;
-  status: string; attempts: number; first_call_seconds: number | null; note: string; transferred_to: string; calls?: CallRec[];
+  status: string; attempts: number; first_call_seconds: number | null; note: string; transferred_to: string; outcome?: string; calls?: CallRec[];
 };
 export type Live = { id: number; parent: string; student: string; class: string; campus: string; attempt: number; since: string; last4?: string; source?: string; phase?: "calling" | "recent" | "next"; status?: string };
 export type ConsoleData = {

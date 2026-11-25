@@ -94,7 +94,7 @@ def build(engine, now: datetime, day: str | None = None, test: bool = False) -> 
             "parent": r["name"] or "", "student": r["student_name"] or "", "class": r["grade"] or "",
             "campus": r["campus"] or "", "phone": mask(r["phone"]), "status": r["status"],
             "attempts": r["attempts"], "first_call_seconds": first, "note": r["note"] or "",
-            "transferred_to": r["transferred_to"] or "", "calls": recs.get(r["id"], [])})
+            "transferred_to": r["transferred_to"] or "", "outcome": r["outcome"] or "", "calls": recs.get(r["id"], [])})
     cnt = Counter(l["status"] for l in leads)
     fresh = [l for l in leads if not l["older"]]       # older enquiries (catch-up) are listed but kept out of the speed figures
     called = [l for l in fresh if l["first_call_seconds"] is not None]
