@@ -230,10 +230,15 @@ class Engine:
         caught_up = self.store.one(                       # older-enquiry calls already placed in the last 60 s (every webhook also runs a tick)
             "SELECT COUNT(*) n FROM calls c JOIN leads l ON l.id=c.lead_id WHERE l.allow_old=1 AND c.started_at>?",
             (iso(now - timedelta(seconds=60)),))["n"]
+        inflight = {x["campus"]: x["n"] for x in self.store.q(     # calls on the line per campus (one counselor takes one parent at a time)
+            "SELECT campus, COUNT(*) n FROM leads WHERE source<>'test' AND status=? AND updated_at>? GROUP BY campus",
+            (Status.CALLING.value, iso(now - timedelta(minutes=4))))}
         for r in rows:
             made = parse(r["created_at"])
             if r["allow_old"] and caught_up >= pace:
                 continue
+            if r["allow_old"] and self.c.get("backfill_one_at_a_time", True) and inflight.get(r["campus"], 0) >= 1:
+                continue                 # older enquiries wait until this campus's line is free, so a transfer is never refused as 'busy'
             if (made and not r["allow_old"] and now - made > timedelta(hours=self.c["stale_after_hours"])
                     and self.store.kv_get(f"force_{r['id']}") is None):
                 self.store.update_lead(r["id"], now, status=Status.STALE.value, next_attempt_at=None,
@@ -250,6 +255,7 @@ class Engine:
             ref = self._place(r, now)
             if ref:
                 placed.append(ref)
+                inflight[r["campus"]] = inflight.get(r["campus"], 0) + 1
                 if r["allow_old"]:
                     caught_up += 1
         self.watchdog(now)

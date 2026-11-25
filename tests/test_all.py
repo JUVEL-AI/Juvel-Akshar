@@ -950,14 +950,15 @@ def test_start_from_date_calls_newer_rows_even_if_old_and_paces_them():
     from datetime import datetime
     e, s, d, n = mk()
     since = datetime(2026, 10, 8, tzinfo=e.cfg.tz)
-    rows = [lead(f"x{i}", phone=f"98765432{i:02d}", at=MON_10AM - timedelta(days=10 - (i % 3))) for i in range(5)]
+    rows = [lead(f"x{i}", phone=f"98765432{i:02d}", at=MON_10AM - timedelta(days=10 - (i % 3)), campus=("tng" if i % 2 else "ecr_campus")) for i in range(5)]
     rows.append(lead("old", phone="9876500000", at=MON_10AM - timedelta(days=40)))     # before the date: silent
     out = e.ingest(rows, MON_10AM, since=since)
     assert out["new"] == 6
     assert s.one("SELECT status FROM leads WHERE key='old'")["status"] == "STALE"
     assert s.one("SELECT COUNT(*) n FROM leads WHERE status='QUEUED' AND allow_old=1")["n"] == 5
     placed = e.tick(MON_10AM)
-    assert len(placed) == 2                                   # paced: backfill_per_minute
+    assert len(placed) == 2                                   # paced: backfill_per_minute (one per campus line)
+    s.x("UPDATE leads SET status='NO_RESPONSE' WHERE status='CALLING'")      # both calls ended
     assert len(e.tick(MON_10AM + timedelta(minutes=1))) == 2
 
 
@@ -1049,10 +1050,11 @@ def test_older_enquiries_are_paced_per_minute_and_get_two_tries():
     from datetime import datetime
     e, s, d, n = mk()
     since = datetime(2026, 10, 8, tzinfo=e.cfg.tz)
-    rows = [lead(f"p{i}", phone=f"98765433{i:02d}", at=MON_10AM - timedelta(days=5)) for i in range(6)]
+    rows = [lead(f"p{i}", phone=f"98765433{i:02d}", at=MON_10AM - timedelta(days=5), campus=("tng" if i % 2 else "ecr_campus")) for i in range(6)]
     e.ingest(rows, MON_10AM, since=since)
     assert len(e.tick(MON_10AM)) == 2
     assert len(e.tick(MON_10AM + timedelta(seconds=20))) == 0          # another tick inside the same minute adds nothing
+    s.x("UPDATE leads SET status='NO_RESPONSE' WHERE status='CALLING'")
     assert len(e.tick(MON_10AM + timedelta(seconds=70))) == 2
 
 
@@ -1152,3 +1154,15 @@ def test_huge_dashboard_answers_are_trimmed():
     assert len(json.dumps(out)) <= 3_000_000
     assert out["leads"][0]["calls"][0]["transcript"] == "x" * 6000 and out["leads"][899]["calls"][0]["transcript"] == ""
     assert out["leads"][899]["calls"][0]["outcome"] == "ok"
+
+
+def test_older_enquiries_wait_while_the_campus_line_is_busy():
+    from datetime import datetime
+    e, s, d, n = mk()
+    since = datetime(2026, 10, 8, tzinfo=e.cfg.tz)
+    e.ingest([lead(f"b{i}", phone=f"98765490{i:02d}", at=MON_10AM - timedelta(days=5), campus="tng") for i in range(4)], MON_10AM, since=since)
+    assert len(e.tick(MON_10AM)) == 1                                  # one at a time for T Nagar, not two
+    assert len(e.tick(MON_10AM + timedelta(minutes=1))) == 0           # the first call is still on the line
+    first = s.one("SELECT id FROM leads WHERE status='CALLING'")["id"]
+    e.resolve(first, MON_10AM + timedelta(minutes=2), "x", "t")
+    assert len(e.tick(MON_10AM + timedelta(minutes=2, seconds=5))) == 1  # line free again
