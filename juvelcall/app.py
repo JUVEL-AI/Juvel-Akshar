@@ -158,6 +158,7 @@ def create_app(engine: Engine, clock=now_utc, run_loop: bool = False, loop_secon
         """Heartbeat. Called every minute by Supabase pg_cron (or any scheduler)."""
         auth(x_webhook_secret)
         out: dict = {}
+        out["placed"] = engine.tick(clock(), limit=10)      # calls first: a slow sheet read must never hold up a call
         every = sheet_cfg.get("poll_seconds", 60)
         if sheets_admin.configured(engine):
             last = engine.store.kv_get("sheet_polled_at")
@@ -168,7 +169,6 @@ def create_app(engine: Engine, clock=now_utc, run_loop: bool = False, loop_secon
                     out["sheet"] = poll_sheet()
                 except Exception as e:
                     out["sheet_error"] = str(e)[:200]
-        out["placed"] = engine.tick(clock(), limit=10)
         try:                                           # reports and reminders must never stop calls
             out.update(ops.periodic(engine, clock()))
         except Exception as e:

@@ -288,8 +288,10 @@ def poll_all(engine, now: datetime, budget: float = 35.0) -> dict:
         bf, bt = str(s.get("backfill_from") or ""), str(s.get("backfill_to") or "")
         if bf and bt and engine.store.kv_get("sheet_backfill_" + s["id"]) != f"{bf}|{bt}":
             res["backfill"] = engine.revive_range("sheet_" + s["id"], datetime.strptime(bf, "%Y-%m-%d").replace(tzinfo=engine.cfg.tz),
-                                                  datetime.strptime(bt, "%Y-%m-%d").replace(tzinfo=engine.cfg.tz), now)
-            engine.store.kv_set("sheet_backfill_" + s["id"], f"{bf}|{bt}")
+                                                  datetime.strptime(bt, "%Y-%m-%d").replace(tzinfo=engine.cfg.tz), now,
+                                                  deadline=t0 + budget)
+            if not res["backfill"].get("partial"):          # a big range is finished over several minutes, never in one long request
+                engine.store.kv_set("sheet_backfill_" + s["id"], f"{bf}|{bt}")
         if first:
             engine.store.kv_set(key, iso(now))
             res["baseline"] = since is None

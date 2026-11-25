@@ -49,10 +49,23 @@ class Engine:
         v = self.store.kv_get("control")
         return v if v in self.CONTROL_LABEL else "running"
 
+    def _campus_states(self) -> dict:
+        """Every campus switch in ONE query, kept for 5 seconds. (It was one query per lead, which on a big queue made the
+        backend slower than Vercel's time limit.)"""
+        import time
+        c = getattr(self, "_cs_cache", None)
+        if c and time.monotonic() - c[0] < 5:
+            return c[1]
+        keys = [f"control_{k}" for k in self.cfg.campuses]
+        rows = self.store.q("SELECT k, v FROM kv WHERE k IN (%s)" % ",".join("?" * len(keys)), tuple(keys)) if keys else []
+        got = {r["k"]: r["v"] for r in rows}
+        out = {k: (got.get(f"control_{k}") if got.get(f"control_{k}") in self.CONTROL_LABEL else "running") for k in self.cfg.campuses}
+        self._cs_cache = (time.monotonic(), out)
+        return out
+
     def campus_state(self, campus: str) -> str:
         """One campus's own switch. Calls for a campus go out only if the master switch AND this switch are running."""
-        v = self.store.kv_get(f"control_{campus}")
-        return v if v in self.CONTROL_LABEL else "running"
+        return self._campus_states().get(campus, "running")
 
     def can_call(self, campus: str) -> bool:
         return self.control_state() == "running" and self.campus_state(campus) == "running"
@@ -82,6 +95,7 @@ class Engine:
             self.store.x("UPDATE leads SET next_attempt_at=? WHERE campus=? AND status IN (?,?) AND next_attempt_at>?",
                          (iso(now), campus, Status.QUEUED.value, Status.RETRY.value, iso(now)))
         self.store.kv_set(f"control_{campus}", new)
+        self._cs_cache = None
         self.store.kv_set(f"control_{campus}_at", iso(now))
         self.store.kv_set(f"control_{campus}_by", who)
         label = self.cfg.campuses[campus]["label"]
@@ -273,7 +287,7 @@ class Engine:
                 n += 1
         return n
 
-    def revive_range(self, source: str, d_from: datetime, d_to: datetime, now: datetime) -> dict:
+    def revive_range(self, source: str, d_from: datetime, d_to: datetime, now: datetime, deadline: float | None = None) -> dict:
         """One-off catch-up asked for by the school: enquiries dated d_from..d_to (inclusive) that were skipped as old are
         queued and called at the paced backfill rate. Bad phones, do-not-call numbers, unknown campuses and phones already
         enquired or called elsewhere are left alone."""
@@ -283,10 +297,14 @@ class Engine:
         live = (Status.STALE.value, Status.DUPLICATE.value, Status.INVALID_PHONE.value, Status.DO_NOT_CALL.value, Status.NEEDS_REVIEW.value)
         rows = self.store.q("SELECT * FROM leads WHERE source=? AND status=? AND (note LIKE ? OR note LIKE ? OR note LIKE ?) ORDER BY created_at",
                             (source, Status.STALE.value, "already in the sheet%", "before the start date%", "lead too old%"))
+        import time
         for r in rows:
             made = parse(r["created_at"])
             if not made or made < d_from or made >= end:
                 continue
+            if deadline is not None and time.monotonic() > deadline:
+                done["partial"] = True                  # out of time for this request: the rest is done on the next minute
+                break
             phone = clean_phone(r["phone"] or "")
             campus = canonical_campus(r["campus"] or "") or ""
             if campus not in self.cfg.campuses:

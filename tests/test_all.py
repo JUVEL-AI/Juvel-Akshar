@@ -1166,3 +1166,23 @@ def test_older_enquiries_wait_while_the_campus_line_is_busy():
     first = s.one("SELECT id FROM leads WHERE status='CALLING'")["id"]
     e.resolve(first, MON_10AM + timedelta(minutes=2), "x", "t")
     assert len(e.tick(MON_10AM + timedelta(minutes=2, seconds=5))) == 1  # line free again
+
+
+def test_campus_switches_cost_one_query_and_big_ranges_finish_over_several_minutes():
+    import time
+    from datetime import datetime
+    e, s, d, n = mk()
+    cnt = {"n": 0}
+    orig = s.q
+    def counting(*a, **k):
+        cnt["n"] += 1
+        return orig(*a, **k)
+    s.q = counting
+    for _ in range(50):
+        e.campus_state("ecr")
+    assert cnt["n"] <= 1
+    s.q = orig
+    since = datetime(2026, 10, 8, tzinfo=e.cfg.tz)
+    e.ingest([lead(f"r{i}", phone=f"98765510{i:02d}", at=MON_10AM - timedelta(days=5)) for i in range(5)], MON_10AM, baseline=True)
+    out = e.revive_range("t", datetime(2026, 10, 1, tzinfo=e.cfg.tz), datetime(2026, 10, 30, tzinfo=e.cfg.tz), MON_10AM, deadline=time.monotonic() - 1)
+    assert out.get("partial") and out["queued"] == 0
