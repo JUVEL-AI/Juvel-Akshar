@@ -289,7 +289,7 @@ export default function Console({ data, demo, error, pinRequired = false, role =
         <section className="card" aria-label="Calling card" style={{ borderColor: liveNow.some((l) => l.phase === "calling") ? "#3DDC97" : "#2A3A4B", marginBottom: 14 }}>
           <h2 style={{ color: "#3DDC97", marginBottom: 8 }}>Calling card</h2>
           {[...liveNow].sort((x, y) => ["calling", "next", "recent"].indexOf(x.phase ?? "calling") - ["calling", "next", "recent"].indexOf(y.phase ?? "calling")).map((l) => {
-            const tag = l.phase === "next" ? { t: "Calling next", c: "#FFB547" } : l.phase === "recent" ? { t: meta(l.status ?? "").label, c: "#8FA1B5" } : { t: "On the line", c: "#3DDC97" };
+            const tag = l.phase === "next" ? { t: "Next", c: "#8FA1B5" } : l.phase === "recent" ? { t: meta(l.status ?? "").label, c: "#8FA1B5" } : { t: "On the line", c: "#3DDC97" };
             return (
               <button key={`${l.phase}-${l.id}`} type="button" onClick={() => setPicked(l.id)}
                 style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "baseline", padding: l.phase === "calling" ? "12px 10px" : "4px 0", fontSize: l.phase === "calling" ? 19 : 14, opacity: l.phase === "calling" ? 1 : 0.75, width: "100%", textAlign: "left", background: l.phase === "calling" ? "rgba(61,220,151,.12)" : "none", borderRadius: 8, border: 0, color: "inherit", cursor: "pointer" }}>
