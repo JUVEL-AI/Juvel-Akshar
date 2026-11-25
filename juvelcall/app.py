@@ -178,7 +178,7 @@ def create_app(engine: Engine, clock=now_utc, run_loop: bool = False, loop_secon
     @app.get("/api/console")
     def api_console(day: str | None = None, x_webhook_secret: str | None = Header(default=None)):
         auth(x_webhook_secret)
-        return console.build(engine, clock(), day)
+        return console.trim(console.build(engine, clock(), day))
 
     @app.get("/api/control")
     def api_control_get(x_webhook_secret: str | None = Header(default=None)):

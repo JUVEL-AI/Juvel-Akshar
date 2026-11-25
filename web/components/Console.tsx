@@ -177,7 +177,7 @@ export default function Console({ data, demo, error, pinRequired = false, role =
         </div>
         <div className="chips">
           {demo && <span className="chip warn">Sample data for preview</span>}
-          {error && <span className="chip bad">Backend not reachable</span>}
+          {error && <span className="chip bad" title={error}>Backend not reachable ({error.replace(/^Error: /, "").slice(0, 70)})</span>}
           <span className="chip"><span className="dot" />{data.hours_label ?? "Mon–Fri 8:30–2:30 · Sat 9:00–2:00"}</span>
           {admin && <Link href="/settings" className="chip" style={{ textDecoration: "none", color: "inherit" }}>⚙ Settings</Link>}
           {admin && <Link href="/sources" className="chip" style={{ textDecoration: "none", color: "inherit" }}>📄 Lead sheets</Link>}

@@ -1142,3 +1142,13 @@ def test_calling_card_announces_before_and_lingers_after():
     assert [x["phase"] for x in console.build(e, MON_10AM + timedelta(seconds=40))["live"]] == ["recent"]
     assert console.build(e, MON_10AM + timedelta(minutes=10))["live"] == []
     assert all(x["phase"] in ("next", "calling", "recent") for x in before)
+
+
+def test_huge_dashboard_answers_are_trimmed():
+    import json
+    from juvelcall import console
+    big = {"leads": [{"id": i, "calls": [{"transcript": "x" * 6000, "summary": "y" * 500, "detail": "z" * 500, "outcome": "ok"}]} for i in range(900)]}
+    out = console.trim(big)
+    assert len(json.dumps(out)) <= 3_000_000
+    assert out["leads"][0]["calls"][0]["transcript"] == "x" * 6000 and out["leads"][899]["calls"][0]["transcript"] == ""
+    assert out["leads"][899]["calls"][0]["outcome"] == "ok"

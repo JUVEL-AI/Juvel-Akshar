@@ -37,6 +37,21 @@ def source_label(labels: dict, source: str) -> str:
     return {"webhook": "Webhook", "test": "Test"}.get(source, name)
 
 
+def trim(out: dict, limit: int = 3_000_000) -> dict:
+    """Vercel refuses answers over about 4.5 MB. If the day is huge, drop the heavy call text (transcripts, summaries,
+    raw details) from the older rows, then from every row; names, statuses and call outcomes always stay."""
+    import json
+    heavy = ("transcript", "summary", "detail")
+    for keep in (40, 0):
+        if len(json.dumps(out, default=str)) <= limit:
+            break
+        for lead in out["leads"][keep:]:
+            for c in lead.get("calls", []):
+                for k in heavy:
+                    c[k] = ""
+    return out
+
+
 def build(engine, now: datetime, day: str | None = None, test: bool = False) -> dict:
     cfg, store = engine.cfg, engine.store
     local_now = now.astimezone(cfg.tz)
