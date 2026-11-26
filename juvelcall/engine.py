@@ -229,6 +229,21 @@ class Engine:
             (phone, since, Status.DUPLICATE.value, Status.INVALID_PHONE.value, Status.DO_NOT_CALL.value)) is not None
 
     # ---------- calling ----------
+    def _campus_holds(self, now: datetime) -> dict:
+        """When each campus may place its next call. After a call that reached the counselor the counselor rests
+        (counselor_rest_seconds, default 5 minutes after the call ended); after any other call there is a short gap."""
+        rest = int(self.c.get("counselor_rest_seconds", 300) or 0)
+        gap = int(self.c.get("min_gap_seconds", 30) or 0)
+        holds: dict = {}
+        for r in self.store.q("SELECT l.campus, c.outcome, c.started_at, c.ended_at FROM calls c JOIN leads l ON l.id=c.lead_id "
+                              "WHERE l.source<>'test' AND c.started_at>? ORDER BY c.started_at DESC",
+                              (iso(now - timedelta(seconds=max(rest, gap) + 1800)),)):
+            if r["campus"] in holds:
+                continue
+            end = parse(r["ended_at"]) or parse(r["started_at"])
+            holds[r["campus"]] = end + timedelta(seconds=rest if r["outcome"] == "TRANSFERRED" else gap)
+        return holds
+
     def tick(self, now: datetime, limit: int = 50) -> list[str]:
         """Place every call that is due. Returns call_refs placed."""
         placed = []
@@ -247,10 +262,13 @@ class Engine:
         inflight = {x["campus"]: x["n"] for x in self.store.q(     # calls on the line per campus (one counselor takes one parent at a time)
             "SELECT campus, COUNT(*) n FROM leads WHERE source<>'test' AND status=? AND updated_at>? GROUP BY campus",
             (Status.CALLING.value, iso(now - timedelta(minutes=3))))}
+        holds = self._campus_holds(now)
         for r in rows:
             made = parse(r["created_at"])
             if r["allow_old"] and caught_up >= pace:
                 continue
+            if holds.get(r["campus"]) and now < holds[r["campus"]] and self.store.kv_get(f"force_{r['id']}") is None:
+                continue                 # the counselor is resting, or the last call on this campus has only just ended
             if self.c.get("one_call_per_campus", True) and inflight.get(r["campus"], 0) >= 1:
                 continue                 # the next parent waits until this campus's current call has finished (new enquiries go before older ones)
             if (made and not r["allow_old"] and now - made > timedelta(hours=self.c["stale_after_hours"])
@@ -270,6 +288,7 @@ class Engine:
             if ref:
                 placed.append(ref)
                 inflight[r["campus"]] = inflight.get(r["campus"], 0) + 1
+                holds[r["campus"]] = now + timedelta(seconds=int(self.c.get("min_gap_seconds", 30) or 0))
                 if r["allow_old"]:
                     caught_up += 1
         self.watchdog(now)
@@ -554,6 +573,9 @@ class Engine:
                 continue
             if not self._on_duty(r["campus"]) or self.campus_state(r["campus"]) != "running":
                 break                                       # nobody on duty, or this campus is paused: wait
+            hold = self._campus_holds(now).get(r["campus"])
+            if hold and now < hold:
+                break                                       # the counselor is resting before the next call
             q.pop(0)
             self.store.update_lead(lid, now, status=Status.QUEUED.value, attempts=0, next_attempt_at=iso(now),
                                    note="call back started from the dashboard")
@@ -655,6 +677,20 @@ class Engine:
                                note=(note or "resolved by a person")[:300])
         self.store.add_audit(now, who, "mark_done", f"lead {lead_id}")
         return True
+
+    def apply_skips(self, source: str, flags: dict, now: datetime) -> int:
+        """The school's sheet remarks say it already worked on these parents (for example 'Not qualified'): they are closed
+        and never called. Only parents still waiting are touched; a parent already called or transferred is left alone."""
+        keys, done = list(flags), 0
+        waiting = (Status.QUEUED.value, Status.RETRY.value, Status.NEEDS_REVIEW.value, Status.STALE.value)
+        for i in range(0, len(keys), 400):
+            chunk = keys[i:i + 400]
+            for r in self.store.q("SELECT id, key FROM leads WHERE source=? AND key IN (%s) AND status IN (?,?,?,?)" % ",".join("?" * len(chunk)),
+                                  (source, *chunk, *waiting)):
+                self.store.update_lead(r["id"], now, status=Status.RESOLVED.value, next_attempt_at=None,
+                                       note=f"already worked on by the school: {flags[r['key']]}"[:300])
+                done += 1
+        return done
 
     PARKED_NOTES = ("calling was stopped%", "arrived while calling was stopped%")
 

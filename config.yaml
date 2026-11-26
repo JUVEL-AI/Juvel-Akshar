@@ -19,6 +19,8 @@ calling:
   retry_minutes: [15, 60, 240]             # delay before attempt 2, 3, 4
   max_attempts: 4
   backfill_per_minute: 2                   # catch-up from a chosen start date: at most this many older enquiries are called per minute
+  counselor_rest_seconds: 300              # after a call that reached the counselor, the campus waits this long (from the end of the call) before the next call
+  min_gap_seconds: 30                      # after a call that did not connect, the campus waits this long before the next call
   one_call_per_campus: true                # the next parent waits until the campus's current call has finished; new enquiries go before older ones
   backfill_max_attempts: 2                 # older enquiries (catch-up) get at most this many tries, with no alert email per parent
   stale_after_hours: 48                    # older leads are not auto-called
@@ -116,6 +118,8 @@ sources:
       worksheet: "Sheet1"
       enabled: true
       columns: {created_at: "Timing", name: "full_name", phone: "phone_number", campus: "which_campus_are_you_enquiring_for?", grade: "which_grade_is_your_child_currently_studying_in?", grade_alt: "which_school_is_your_child_currently_studying_in?", email: "email", city: "city"}
+      skip_columns: ["Lead Quality", "Remarks on Parents", "Status"]     # the school's own notes: a parent they already worked on is not called
+      skip_words: ["not qualified", "unqualified", "not interested", "admitted", "wrong number", "do not call", "dnd"]
     - label: "Google Ads leads (AAIS Leads)"
       spreadsheet_id: "1qSsvxlDE639YOw6wsi_Tv_d4IzYhMBIL52B7hwgM59w"
       worksheet: "Google Ads"

@@ -18,6 +18,30 @@ REQUIRED = [k for k, _, r in FIELDS if r]
 ID_RE = re.compile(r"/d/([A-Za-z0-9_-]{20,})")
 
 
+DEFAULT_SKIP_WORDS = ["not qualified", "unqualified", "not interested", "admitted", "wrong number", "do not call", "dnd"]
+
+
+def _as_list(v, limit: int, width: int) -> list[str]:
+    items = v if isinstance(v, list) else str(v or "").split(",")
+    out = []
+    for x in items:
+        x = re.sub(r"\s+", " ", str(x)).strip()[:width]
+        if x and x.lower() not in [o.lower() for o in out]:
+            out.append(x)
+    return out[:limit]
+
+
+def _skip_reason(row: dict, cols: list[str], words: list[str]) -> str:
+    """The school already worked on this parent when one of the chosen columns says one of the skip words."""
+    want = {re.sub(r"\s+", " ", c).strip().lower() for c in cols}
+    for h, v in row.items():
+        if re.sub(r"\s+", " ", str(h)).strip().lower() in want:
+            t = str(v or "").lower()
+            if any(w and w in t for w in words):
+                return f"{str(h).strip()} says '{str(v).strip()[:40]}'"
+    return ""
+
+
 def parse_sheet_id(text: str) -> str:
     t = (text or "").strip()
     m = ID_RE.search(t)
@@ -198,9 +222,10 @@ def validate(engine, payload: dict) -> dict:
                 raise ValueError(f"{label}: dates must look like 2026-05-01") from None
             if a > b:
                 raise ValueError(f"{label}: the older-enquiries 'from' date is after its 'to' date")
+        sk_cols, sk_words = _as_list(s.get("skip_columns"), 6, 60), [w.lower() for w in _as_list(s.get("skip_words"), 30, 40)]
         out["sheets"].append({"id": str(s.get("id") or sid[:8] + str(i)), "label": label, "spreadsheet_id": sid,
                               "worksheet": ws, "columns": cols, "enabled": bool(s.get("enabled", True)), "start_from": sf,
-                              "backfill_from": bf, "backfill_to": bt})
+                              "backfill_from": bf, "backfill_to": bt, "skip_columns": sk_cols, "skip_words": sk_words})
     dc = str(payload.get("default_campus", "") or "").strip()
     if dc and dc not in engine._base["campuses"]:
         raise ValueError("Unknown default campus")
@@ -267,17 +292,25 @@ def poll_all(engine, now: datetime, budget: float = 35.0) -> dict:
             _note_status(engine, s["id"], now, error=_friendly(e, creds))
             continue
         leads = []
+        flags: dict = {}                                  # parents the school already worked on (their remarks say so): never called
+        sk_cols = s.get("skip_columns") or []
+        sk_words = [w.lower() for w in (s.get("skip_words") or DEFAULT_SKIP_WORDS)]
         for i, row in enumerate(rows, start=2):
             try:
-                leads.append(lead_from_row(row, s["columns"], engine.cfg.tz, "sheet_" + s["id"], f"row {i}",
-                                           engine.cfg.sources.get("date_order", "mdy")))
+                lead = lead_from_row(row, s["columns"], engine.cfg.tz, "sheet_" + s["id"], f"row {i}",
+                                     engine.cfg.sources.get("date_order", "mdy"))
             except Exception:
                 continue
+            leads.append(lead)
+            if sk_cols:
+                why = _skip_reason(row, sk_cols, sk_words)
+                if why:
+                    flags[lead.key] = why
         first = not engine.store.kv_get(key)
         sf = str(s.get("start_from") or "").strip()
         bf, bt = str(s.get("backfill_from") or ""), str(s.get("backfill_to") or "")
         import hashlib                                   # nothing new in the sheet and nothing changed in its settings: skip the database work
-        fp = hashlib.sha1(json.dumps([len(leads), [x.key for x in leads[-3:]], sf, bf, bt, s["columns"]], sort_keys=True,
+        fp = hashlib.sha1(json.dumps([len(leads), [x.key for x in leads[-3:]], sf, bf, bt, s["columns"], sorted(flags.items()), sk_cols, sk_words], sort_keys=True,
                                      default=str).encode()).hexdigest()
         if (not first and leads and engine.store.kv_get("sheet_fp_" + s["id"]) == fp
                 and (not (bf and bt) or engine.store.kv_get("sheet_backfill_" + s["id"]) == f"{bf}|{bt}")):
@@ -292,6 +325,8 @@ def poll_all(engine, now: datetime, budget: float = 35.0) -> dict:
                 engine.revive_since("sheet_" + s["id"], since, now)
             engine.store.kv_set("sheet_since_" + s["id"], sf)
         res = engine.ingest(leads, now, baseline=first and since is None, since=since)
+        if flags:
+            res["skipped_by_remarks"] = engine.apply_skips("sheet_" + s["id"], flags, now)
         if since:
             res["from_date"] = sf
         if bf and bt and engine.store.kv_get("sheet_backfill_" + s["id"]) != f"{bf}|{bt}":

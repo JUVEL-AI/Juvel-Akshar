@@ -1133,19 +1133,46 @@ def test_each_campus_has_its_own_start_pause_stop():
     assert not e.can_call("t_nagar")
 
 
-def test_calling_card_announces_before_and_lingers_after():
+def test_calling_card_shows_only_the_latest_call_of_each_campus():
     from juvelcall import console
     e, s, d, n = mk()
-    e.ingest([lead("cc1", phone="9876548001")], MON_10AM)
-    before = console.build(e, MON_10AM - timedelta(seconds=1))["live"]
+    e.ingest([lead("cc1", phone="9876548001"), lead("cc2", phone="9876548002")], MON_10AM)       # same campus: one call at a time
     e.tick(MON_10AM)
     during = console.build(e, MON_10AM)["live"]
-    assert [x["phase"] for x in during] == ["calling"]
-    lid = during[0]["id"]
-    e.resolve(lid, MON_10AM + timedelta(seconds=30), "x", "t")
-    assert [x["phase"] for x in console.build(e, MON_10AM + timedelta(seconds=40))["live"]] == ["recent"]
-    assert console.build(e, MON_10AM + timedelta(minutes=10))["live"] == []
-    assert all(x["phase"] in ("next", "calling", "recent") for x in before)
+    assert [x["phase"] for x in during] == ["calling"]                                           # nobody 'next' or 'queued' is shown
+    ref = s.one("SELECT call_ref FROM calls")["call_ref"]
+    s.x("UPDATE calls SET outcome='NO_ANSWER', ended_at=? WHERE call_ref=?", (MON_10AM.isoformat(), ref))
+    assert [x["phase"] for x in console.build(e, MON_10AM + timedelta(seconds=30))["live"]] == ["not_connected"]
+    assert console.build(e, MON_10AM + timedelta(minutes=5))["live"] == []                      # a call that did not connect leaves the card
+
+
+def test_connected_parent_stays_on_the_card_and_the_counselor_rests_five_minutes():
+    from juvelcall import console
+    e, s, d, n = mk()
+    e.ingest([lead("r1", phone="9876549001"), lead("r2", phone="9876549002")], MON_10AM)
+    assert len(e.tick(MON_10AM)) == 1
+    ref = s.one("SELECT call_ref FROM calls")["call_ref"]
+    first = s.one("SELECT lead_id FROM calls")["lead_id"]
+    end = MON_10AM + timedelta(seconds=90)
+    s.x("UPDATE calls SET outcome='TRANSFERRED', ended_at=? WHERE call_ref=?", (end.isoformat(), ref))
+    s.x("UPDATE leads SET status='TRANSFERRED' WHERE id=?", (first,))
+    assert len(e.tick(end + timedelta(minutes=4, seconds=50))) == 0                              # still resting
+    live = console.build(e, end + timedelta(minutes=4))["live"]
+    assert [x["phase"] for x in live] == ["connected"] and live[0]["id"] == first                # the card does not change while the counselor may still be talking
+    assert len(e.tick(end + timedelta(minutes=5, seconds=5))) == 1                               # five minutes after the call ended
+    assert [x["phase"] for x in console.build(e, end + timedelta(minutes=5, seconds=6))["live"]] == ["calling"]
+
+
+def test_after_a_call_that_did_not_connect_the_gap_is_short():
+    e, s, d, n = mk()
+    e.ingest([lead("g1", phone="9876549101"), lead("g2", phone="9876549102")], MON_10AM)
+    assert len(e.tick(MON_10AM)) == 1
+    ref = s.one("SELECT call_ref FROM calls")["call_ref"]
+    lid = s.one("SELECT lead_id FROM calls")["lead_id"]
+    s.x("UPDATE calls SET outcome='NO_ANSWER', ended_at=? WHERE call_ref=?", (MON_10AM.isoformat(), ref))
+    s.x("UPDATE leads SET status='RETRY', next_attempt_at='2099-01-01T00:00:00+00:00' WHERE id=?", (lid,))
+    assert len(e.tick(MON_10AM + timedelta(seconds=10))) == 0                                    # 30-second gap
+    assert len(e.tick(MON_10AM + timedelta(seconds=35))) == 1
 
 
 def test_huge_dashboard_answers_are_trimmed():
@@ -1215,16 +1242,14 @@ def test_counselor_outcome_stops_calling_and_dnd_blocks_the_number():
     assert e.tick(MON_10AM) == []                                      # neither parent is called
 
 
-def test_calling_card_shows_the_full_number_only_for_the_call_on_the_line():
+def test_calling_card_carries_the_full_number_of_its_one_parent():
     from juvelcall import console
     e, s, d, n = mk()
     e.ingest([lead(f"f{i}", phone=f"98765540{i:02d}", at=MON_10AM, campus="tng") for i in range(2)], MON_10AM)
     e.tick(MON_10AM)
     live = console.build(e, MON_10AM + timedelta(seconds=20))["live"]
-    on = [x for x in live if x["phase"] == "calling"]
-    other = [x for x in live if x["phase"] != "calling"]
-    assert on and on[0]["phone"].startswith("+91") and len(on[0]["phone"]) == 13
-    assert all(x["phone"] == "" for x in other)
+    assert len(live) == 1 and live[0]["phone"].startswith("+91") and len(live[0]["phone"]) == 13
+
 
 
 def test_unchanged_sheet_is_not_re_read_into_the_database(monkeypatch):
@@ -1264,3 +1289,34 @@ def test_queue_parked_puts_back_only_parents_never_called():
     assert s.one("SELECT status FROM leads WHERE id=?", (ids[0],))["status"] == "QUEUED"
     assert s.one("SELECT status FROM leads WHERE id=?", (ids[3],))["status"] == "NEEDS_REVIEW"
     assert e.queue_parked(MON_10AM, "priya")["queued"] == 0                           # pressing it twice changes nothing
+
+
+def test_call_log_download_lists_every_call_including_failed_ones():
+    from juvelcall import ops
+    e, s, d, n = mk()
+    e.ingest([lead("c1", phone="9876558001", at=MON_10AM, campus="tng")], MON_10AM)
+    e.tick(MON_10AM)
+    s.x("UPDATE calls SET outcome='FAILED', ended_reason='call.in-progress.error-sip-outbound-call-failed-to-connect'")
+    s.x("UPDATE leads SET status='RETRY'")
+    out = ops.export_calls_csv(e, None, MON_10AM + timedelta(minutes=1))
+    assert "Failed to connect" in out and "sip outbound call failed to connect" in out and "RETRY" in out
+
+
+def test_parents_the_school_already_worked_on_are_not_called(monkeypatch):
+    from juvelcall import sheets_admin
+    e, s, d, n = mk()
+    rows = [{"d": "2026-11-26 09:00:00", "n": "Good", "p": "9876560001", "c": "T.Nagar", "Lead Quality ": "Qualified"},
+            {"d": "2026-11-26 09:01:00", "n": "Worked", "p": "9876560002", "c": "T.Nagar", "Lead Quality ": "Not Qualified"},
+            {"d": "2026-11-26 09:02:00", "n": "Later", "p": "9876560003", "c": "ECR", "Lead Quality ": ""}]
+    cols = {"created_at": "d", "name": "n", "phone": "p", "campus": "c"}
+    sheet = {"id": "x2", "label": "T", "spreadsheet_id": "s", "worksheet": "w", "columns": cols, "skip_columns": ["lead quality"], "skip_words": []}
+    monkeypatch.setattr(sheets_admin, "configured", lambda eng: [sheet])
+    monkeypatch.setattr(sheets_admin, "google_json", lambda eng: "{}")
+    monkeypatch.setattr(sheets_admin, "read_rows", lambda *a: rows)
+    sheets_admin.poll_all(e, MON_10AM)
+    st = {r["name"]: r for r in s.q("SELECT name,status,note FROM leads")}
+    assert st["Worked"]["status"] == "RESOLVED" and "Not Qualified" in st["Worked"]["note"]
+    assert st["Good"]["status"] == "STALE"                                                 # first read: already in the sheet before go-live
+    rows[2]["Lead Quality "] = "not interested"                                            # the school writes a remark later
+    sheets_admin.poll_all(e, MON_10AM + timedelta(minutes=1))
+    assert s.one("SELECT status FROM leads WHERE name='Later'")["status"] == "RESOLVED"

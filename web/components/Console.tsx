@@ -289,6 +289,7 @@ export default function Console({ data, demo, error, pinRequired = false, role =
           onChange={(e) => e.target.value && router.push(`/?day=${e.target.value}`)} />
         <input type="search" aria-label="Search parent, student or phone" placeholder="Search parent, student or last digits of a phone…" value={q} onChange={(e) => setQ(e.target.value)} />
         {admin && !demo && <a className="cbtn" style={{ textDecoration: "none" }} href={`/api/export${day ? `?day=${day}` : ""}`}>⬇ Download Excel (CSV)</a>}
+        {admin && !demo && <a className="cbtn" style={{ textDecoration: "none" }} href={`/api/export?kind=calls${day ? `&day=${day}` : ""}`}>⬇ Download call log (every call)</a>}
       </div>
       {found && (
         <section className="card srch" aria-label="Search results">
@@ -308,24 +309,25 @@ export default function Console({ data, demo, error, pinRequired = false, role =
       </nav>
 
       {liveNow.length > 0 && (
-        <section className="card" aria-label="Calling card" style={{ borderColor: liveNow.some((l) => l.phase === "calling") ? "#3DDC97" : "#2A3A4B", marginBottom: 14 }}>
+        <section className="card" aria-label="Calling card" style={{ borderColor: liveNow.some((l) => l.phase !== "not_connected") ? "#3DDC97" : "#2A3A4B", marginBottom: 14 }}>
           <h2 style={{ color: "#3DDC97", marginBottom: 8 }}>Calling card</h2>
-          {[...liveNow].sort((x, y) => ["calling", "next", "recent"].indexOf(x.phase ?? "calling") - ["calling", "next", "recent"].indexOf(y.phase ?? "calling")).map((l) => {
-            const tag = l.phase === "next" ? { t: "Next", c: "#8FA1B5" } : l.phase === "recent" ? { t: meta(l.status ?? "").label, c: "#8FA1B5" } : { t: "On the line", c: "#3DDC97" };
+          {liveNow.map((l) => {
+            const on = l.phase !== "not_connected";
+            const tag = l.phase === "calling" ? { t: "Calling this parent now", c: "#FFB547" } : l.phase === "connected" ? { t: "Connected to you", c: "#3DDC97" } : { t: "Did not connect", c: "#8FA1B5" };
             return (
-              <button key={`${l.phase}-${l.id}`} type="button" onClick={() => setPicked(l.id)}
-                style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "baseline", padding: l.phase === "calling" ? "12px 10px" : "4px 0", fontSize: l.phase === "calling" ? 19 : 14, opacity: l.phase === "calling" ? 1 : 0.75, width: "100%", textAlign: "left", background: l.phase === "calling" ? "rgba(61,220,151,.12)" : "none", borderRadius: 8, border: 0, color: "inherit", cursor: "pointer" }}>
+              <button key={`${l.campus}-${l.id}`} type="button" onClick={() => setPicked(l.id)}
+                style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "baseline", padding: on ? "12px 10px" : "4px 0", fontSize: on ? 19 : 14, opacity: on ? 1 : 0.75, width: "100%", textAlign: "left", background: on ? "rgba(61,220,151,.12)" : "none", borderRadius: 8, border: 0, color: "inherit", cursor: "pointer", marginBottom: 6 }}>
                 <span className="pill" style={{ color: tag.c, background: "rgba(255,255,255,.06)" }}>{tag.t}</span>
-                <b style={l.phase === "calling" ? { fontSize: 24 } : undefined}>{l.parent || "Parent"}</b>
+                <b style={on ? { fontSize: 24 } : undefined}>{l.parent || "Parent"}</b>
                 {l.phone ? <span className="mono" style={{ fontWeight: 700 }}>{fmtPhone(l.phone)}</span> : l.last4 && <span className="sub">••• {l.last4}</span>}
-                {l.phase === "calling" && (l.student || l["class"]) && <span>Student: <b>{l.student || "—"}</b>{l["class"] ? ` · ${l["class"]}` : ""}</span>}
+                {(l.student || l["class"]) && <span>Student: <b>{l.student || "—"}</b>{l["class"] ? ` · ${l["class"]}` : ""}</span>}
                 <span>From <b>{l.source || "enquiry"}</b></span>
                 {Object.keys(data.campuses).length > 1 && <span className="sub">{data.campuses[l.campus] ?? l.campus}</span>}
-                <span className="sub">{l.phase === "next" ? "due within about a minute" : `called ${l.since}`}</span>
+                <span className="sub">called {l.since}</span>
               </button>
             );
           })}
-          <div className="sub" style={{ marginTop: 6 }}>Tap a name to see the call details below.</div>
+          <div className="sub" style={{ marginTop: 6 }}>The card changes only when the next call is placed. After a connected call the next one waits 5 minutes.</div>
         </section>
       )}
 

@@ -3,13 +3,13 @@ import { useState } from "react";
 import type { SourcesData, SheetCfg } from "@/lib/backend";
 
 type Preview = { title: string; tabs: string[]; worksheet: string; headers: string[]; row_count: number; sample: Record<string, string>[]; suggested: Record<string, string> };
-type Row = SheetCfg & { spreadsheet: string; preview?: Preview; busy?: boolean; err?: string };
+type Row = SheetCfg & { skip_columns_txt?: string; skip_words_txt?: string; spreadsheet: string; preview?: Preview; busy?: boolean; err?: string };
 
 const blank = (n: number): Row => ({ id: "", label: `Sheet ${n}`, spreadsheet_id: "", spreadsheet: "", worksheet: "", enabled: true, columns: {}, start_from: "", backfill_from: "", backfill_to: "" });
 
 export default function SourcesForm({ initial }: { initial: SourcesData | null }) {
   const [d, setD] = useState<SourcesData | null>(initial);
-  const [rows, setRows] = useState<Row[]>(() => (initial?.sheets ?? []).map((s) => ({ ...s, spreadsheet: s.spreadsheet_id })));
+  const [rows, setRows] = useState<Row[]>(() => (initial?.sheets ?? []).map((s) => ({ ...s, spreadsheet: s.spreadsheet_id, skip_columns_txt: (s.skip_columns ?? []).join(", "), skip_words_txt: (s.skip_words ?? []).join(", ") })));
   const [dc, setDc] = useState(initial?.default_campus ?? "");
   const [order, setOrder] = useState(initial?.date_order ?? "mdy");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -29,7 +29,7 @@ export default function SourcesForm({ initial }: { initial: SourcesData | null }
   const save = async () => {
     setBusy(true); setMsg(null);
     const res = await fetch("/api/sources", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
-      sheets: rows.map((r) => ({ id: r.id, label: r.label, spreadsheet: r.spreadsheet, worksheet: r.worksheet, columns: r.columns, enabled: r.enabled, start_from: r.start_from ?? "", backfill_from: r.backfill_from ?? "", backfill_to: r.backfill_to ?? "" })), default_campus: dc, date_order: order }) });
+      sheets: rows.map((r) => ({ id: r.id, label: r.label, spreadsheet: r.spreadsheet, worksheet: r.worksheet, columns: r.columns, enabled: r.enabled, start_from: r.start_from ?? "", backfill_from: r.backfill_from ?? "", backfill_to: r.backfill_to ?? "", skip_columns: r.skip_columns_txt ?? "", skip_words: r.skip_words_txt ?? "" })), default_campus: dc, date_order: order }) });
     const j = await res.json().catch(() => ({}));
     if (res.ok) { setD(j.view); setMsg({ ok: true, text: "Saved. A sheet added now is read once to note who is already in it. Only enquiries that arrive after that are called." }); }
     else setMsg({ ok: false, text: j.error || "Could not save" });
@@ -65,6 +65,13 @@ export default function SourcesForm({ initial }: { initial: SourcesData | null }
             <button className="cbtn" onClick={() => setRows(rows.filter((_, k) => k !== i))}>Remove</button>
           </div>
           <div className="set-row">
+            <label className="set-col" style={{ flex: 1 }}>Do not call if these columns say…
+              <input value={r.skip_columns_txt ?? ""} placeholder="Lead Quality, Remarks on Parents, Status" onChange={(e) => upd(i, { skip_columns_txt: e.target.value })} /></label>
+            <label className="set-col" style={{ flex: 1 }}>…any of these words
+              <input value={r.skip_words_txt ?? ""} placeholder="not qualified, not interested, admitted (blank = standard list)" onChange={(e) => upd(i, { skip_words_txt: e.target.value })} /></label>
+          </div>
+          <p className="sub" style={{ margin: "0 0 6px" }}>Leave the columns empty to turn this off. When a remark in the sheet matches, that parent is closed as “already worked on by the school” and is not called, even if the remark is added later.</p>
+          <div className="set-row">
             <label className="set-col" style={{ flex: 2 }}>Google Sheet link
               <input value={r.spreadsheet} placeholder="https://docs.google.com/spreadsheets/d/…" onChange={(e) => upd(i, { spreadsheet: e.target.value })} /></label>
             <label className="set-col" style={{ flex: 1 }}>Tab name
@@ -96,7 +103,7 @@ export default function SourcesForm({ initial }: { initial: SourcesData | null }
       ))}
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
         <button className="cbtn" onClick={() => setRows([...rows, blank(rows.length + 1)])}>+ Add another sheet</button>
-        {(d.presets?.length ?? 0) > 0 && <button className="cbtn" onClick={() => setRows((d.presets ?? []).map((p) => ({ ...p, id: "", spreadsheet: p.spreadsheet_id })))}>Load Akshar Arbol sheets</button>}
+        {(d.presets?.length ?? 0) > 0 && <button className="cbtn" onClick={() => setRows((d.presets ?? []).map((p) => ({ ...p, id: "", spreadsheet: p.spreadsheet_id, skip_columns_txt: (p.skip_columns ?? []).join(", "), skip_words_txt: (p.skip_words ?? []).join(", ") })))}>Load Akshar Arbol sheets</button>}
       </div>
       <p className="sub"><b>Call enquiries from date:</b> leave empty and only enquiries that arrive <i>after you save</i> are called. Pick a date and every enquiry on or after it is called (3 a minute, in calling hours); older ones stay silent. Move the date earlier later and the extra ones are called too.</p>
       {(d.presets?.length ?? 0) > 0 && <p className="sub">“Load Akshar Arbol sheets” fills in the school's Meta, Google Ads and website sheets with the right columns. Press Save sheets after sharing them with the address above.</p>}

@@ -254,10 +254,11 @@ def create_app(engine: Engine, clock=now_utc, run_loop: bool = False, loop_secon
         return ops.search(engine, q, campus=campus)
 
     @app.get("/api/export")
-    def api_export(day: str | None = None, by: str = "dashboard", x_webhook_secret: str | None = Header(default=None)):
+    def api_export(day: str | None = None, by: str = "dashboard", kind: str = "enquiries", x_webhook_secret: str | None = Header(default=None)):
         auth(x_webhook_secret)
-        engine.store.add_audit(clock(), by[:40], "export", day or "today")
-        return Response(ops.export_csv(engine, day, clock()), media_type="text/csv; charset=utf-8")
+        engine.store.add_audit(clock(), by[:40], "export" if kind != "calls" else "export_calls", day or "today")
+        body = ops.export_calls_csv(engine, day, clock()) if kind == "calls" else ops.export_csv(engine, day, clock())
+        return Response(body, media_type="text/csv; charset=utf-8")
 
     @app.get("/api/test")
     def api_test(x_webhook_secret: str | None = Header(default=None)):
