@@ -9,9 +9,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const who = whoFromReq(req);
   const body = await req.json().catch(() => ({}));
   const outcome = String(body.outcome ?? "");
-  if (!["admitted", "not_admitted", "interested", "dnd"].includes(outcome)) return NextResponse.json({ ok: false, error: "Pick an outcome" }, { status: 400 });
+  const dnd = body.dnd === true;
+  if (!["interested_next", "not_interested", "needs_time", "parent_callback", "school_cannot_support"].includes(outcome) && !(dnd && outcome === ""))
+    return NextResponse.json({ ok: false, error: "Pick an outcome" }, { status: 400 });
   const r = await fetch(`${base()}/api/lead/${id}/outcome`, { method: "POST", headers: secretHeaders(),
-    body: JSON.stringify({ outcome, by: who.user, campus: campusScope(who.user, who.role) ?? "" }) });
+    body: JSON.stringify({ outcome, dnd, by: who.user, campus: campusScope(who.user, who.role) ?? "" }) });
   const j = await r.json().catch(() => ({}));
   return NextResponse.json({ ok: r.ok, error: r.ok ? "" : (j.detail ?? "Could not save") }, { status: r.ok ? 200 : r.status });
 }

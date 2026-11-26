@@ -500,12 +500,12 @@ def export_csv(engine, day: str | None, now: datetime) -> str:
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(["Time", "Parent", "Student", "Class", "Campus", "Phone", "Status", "Attempts",
-                "First call after (seconds)", "Connected to", "Note"])
+                "First call after (seconds)", "Connected to", "Counselor outcome", "Note"])
     for r in rows:
         w.writerow([parse(r["created_at"]).astimezone(cfg.tz).strftime("%d-%m-%Y %H:%M"), r["name"] or "",
                     r["student_name"] or "", r["grade"] or "", cfg.campuses.get(r["campus"], {}).get("label", r["campus"] or ""),
                     r["phone"] or r["phone_raw"] or "", r["status"], r["attempts"], first.get(r["id"], ""),
-                    r["transferred_to"] or "", r["note"] or ""])
+                    r["transferred_to"] or "", engine.OUTCOMES.get(r["outcome"] or "", ""), r["note"] or ""])
     return buf.getvalue()
 
 
@@ -522,20 +522,21 @@ def export_calls_csv(engine, day: str | None, now: datetime) -> str:
              else local.replace(hour=0, minute=0, second=0, microsecond=0))
     rows = engine.store.q(
         "SELECT c.started_at, c.attempt, c.outcome, c.ended_reason, c.duration_seconds, l.name, l.student_name, l.grade, l.campus, "
-        "l.phone, l.phone_raw, l.transferred_to, l.created_at, l.status FROM calls c JOIN leads l ON l.id=c.lead_id "
+        "l.phone, l.phone_raw, l.transferred_to, l.created_at, l.status, l.outcome AS lead_outcome FROM calls c JOIN leads l ON l.id=c.lead_id "
         "WHERE c.started_at>=? AND c.started_at<? AND l.source<>'test' ORDER BY c.started_at",
         (iso(start), iso(start + timedelta(days=1))))
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(["Call time", "Parent", "Student", "Class", "Campus", "Phone", "Enquiry date", "Attempt", "Result",
-                "Reason", "Seconds", "Connected to", "Enquiry status now"])
+                "Reason", "Seconds", "Connected to", "Counselor outcome", "Enquiry status now"])
     for r in rows:
         w.writerow([parse(r["started_at"]).astimezone(cfg.tz).strftime("%d-%m-%Y %H:%M:%S"), r["name"] or "", r["student_name"] or "",
                     r["grade"] or "", cfg.campuses.get(r["campus"], {}).get("label", r["campus"] or ""), r["phone"] or r["phone_raw"] or "",
                     parse(r["created_at"]).astimezone(cfg.tz).strftime("%d-%m-%Y %H:%M"), r["attempt"],
                     CALL_RESULT.get(r["outcome"] or "", r["outcome"] or "In progress"),
                     (r["ended_reason"] or "").replace("call.in-progress.", "").replace("-", " "),
-                    r["duration_seconds"] if r["duration_seconds"] is not None else "", r["transferred_to"] or "", r["status"]])
+                    r["duration_seconds"] if r["duration_seconds"] is not None else "", r["transferred_to"] or "",
+                    engine.OUTCOMES.get(r["lead_outcome"] or "", ""), r["status"]])
     return buf.getvalue()
 
 

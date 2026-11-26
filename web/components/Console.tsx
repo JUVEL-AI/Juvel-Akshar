@@ -123,15 +123,16 @@ export default function Console({ data, demo, error, pinRequired = false, role =
     router.refresh();
   };
   const [leadMsg, setLeadMsg] = useState("");
-  const OUTCOMES: [string, string][] = [["admitted", "Admitted"], ["not_admitted", "Not admitted"], ["interested", "Interested, follow up"], ["dnd", "Do not disturb"]];
-  const [pick, setPick] = useState<{ id: number; v: string }>({ id: 0, v: "" });
-  const saveOutcome = async (id: number, v: string) => {
-    if (demo || !v) return;
-    if (v === "dnd" && !window.confirm("Mark this parent as Do not disturb? They will never be called again.")) return;
-    const r = await fetch(`/api/outcome/${id}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ outcome: v }) });
+  const OUTCOMES: [string, string][] = [["interested_next", "Interested - next steps"], ["not_interested", "Not interested"], ["needs_time", "Needs time to decide"], ["parent_callback", "Parent will call back"], ["school_cannot_support", "School cannot support"]];
+  const OUTCOME_LABEL: Record<string, string> = { ...Object.fromEntries(OUTCOMES), dnd: "Do not disturb", admitted: "Admitted", not_admitted: "Not admitted", interested: "Interested, follow up" };
+  const [pick, setPick] = useState<{ id: number; v: string; dnd: boolean }>({ id: 0, v: "", dnd: false });
+  const saveOutcome = async (id: number, v: string, dnd: boolean) => {
+    if (demo || (!v && !dnd)) return;
+    if (dnd && !window.confirm("Mark this parent as Do not disturb? They will never be called again.")) return;
+    const r = await fetch(`/api/outcome/${id}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ outcome: v, dnd }) });
     const j = await r.json().catch(() => ({}));
     setLeadMsg(r.ok ? "" : j.error || "Could not save");
-    if (r.ok) { setPick({ id: 0, v: "" }); router.refresh(); }
+    if (r.ok) { setPick({ id: 0, v: "", dnd: false }); router.refresh(); }
   };
   const leadAction = async (id: number, kind: "call" | "delete") => {
     if (demo) return;
@@ -385,16 +386,19 @@ export default function Console({ data, demo, error, pinRequired = false, role =
                   {!demo && (
                     <fieldset style={{ border: "1px solid #2A3A4B", borderRadius: 10, padding: "8px 12px", marginTop: 12 }}>
                       <legend className="eyebrow" style={{ padding: "0 6px" }}>After speaking to the parent</legend>
-                      {OUTCOMES.map(([v, t]) => (
-                        <label key={v} style={{ display: "flex", gap: 8, alignItems: "center", padding: "5px 0", fontSize: 15, cursor: "pointer" }}>
-                          <input type="radio" name={`outcome-${sel.id}`} value={v}
-                            checked={(pick.id === sel.id ? pick.v : sel.outcome ?? "") === v}
-                            onChange={() => setPick({ id: sel.id, v })} />
-                          {t}
-                        </label>))}
-                      <button type="button" className="fchip" style={{ marginTop: 6 }} disabled={pick.id !== sel.id || !pick.v}
-                        onClick={() => saveOutcome(sel.id, pick.v)}>Save</button>
-                      {sel.outcome && <div className="sub" style={{ marginTop: 6 }}>Saved: {OUTCOMES.find(([v]) => v === sel.outcome)?.[1]}. Calling has stopped for this enquiry.</div>}
+                      <select aria-label="Outcome" style={{ width: "100%", padding: "8px 10px", fontSize: 15 }}
+                        value={pick.id === sel.id ? pick.v : (sel.outcome && OUTCOMES.some(([v]) => v === sel.outcome) ? sel.outcome : "")}
+                        onChange={(e) => setPick({ id: sel.id, v: e.target.value, dnd: pick.id === sel.id ? pick.dnd : false })}>
+                        <option value="">Choose what the parent said…</option>
+                        {OUTCOMES.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
+                      </select>
+                      <label style={{ display: "flex", gap: 8, alignItems: "center", padding: "8px 0 2px", fontSize: 14, cursor: "pointer" }}>
+                        <input type="checkbox" checked={pick.id === sel.id && pick.dnd} onChange={(e) => setPick({ id: sel.id, v: pick.id === sel.id ? pick.v : "", dnd: e.target.checked })} />
+                        Parent asked not to be called again (Do not disturb)
+                      </label>
+                      <button type="button" className="fchip" style={{ marginTop: 6 }} disabled={pick.id !== sel.id || (!pick.v && !pick.dnd)}
+                        onClick={() => saveOutcome(sel.id, pick.v, pick.dnd)}>Save</button>
+                      {sel.outcome && <div className="sub" style={{ marginTop: 6 }}>Saved: {OUTCOME_LABEL[sel.outcome] ?? sel.outcome}. Calling has stopped for this enquiry.</div>}
                     </fieldset>)}
                   {leadMsg && <div className="chip bad" role="alert" style={{ marginTop: 8 }}>{leadMsg}</div>}</div>
                 <div>

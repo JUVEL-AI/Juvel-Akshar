@@ -717,26 +717,31 @@ class Engine:
         self.store.add_audit(now, who, "queue_parked", f"{n} enquiries" + (f" ({campus})" if campus else ""))
         return {"queued": n}
 
-    OUTCOMES = {"admitted": "Admitted", "not_admitted": "Not admitted", "interested": "Interested, follow up", "dnd": "Do not disturb"}
+    OUTCOME_CHOICES = {"interested_next": "Interested - next steps", "not_interested": "Not interested",
+                       "needs_time": "Needs time to decide", "parent_callback": "Parent will call back",
+                       "school_cannot_support": "School cannot support"}
+    OUTCOMES = {**OUTCOME_CHOICES, "dnd": "Do not disturb",                   # older saves keep their wording
+                "admitted": "Admitted", "not_admitted": "Not admitted", "interested": "Interested, follow up"}
 
-    def set_outcome(self, lead_id: int, now: datetime, outcome: str, who: str = "") -> str | None:
-        """A counselor records how the conversation ended. Calling stops for this enquiry; 'Do not disturb' also puts the
-        number on the do-not-call list. Returns an error message, or None when saved."""
-        if outcome not in self.OUTCOMES:
+    def set_outcome(self, lead_id: int, now: datetime, outcome: str, who: str = "", dnd: bool = False) -> str | None:
+        """A counselor records how the conversation ended. Calling stops for this enquiry. With 'dnd' ticked the parent asked
+        not to be called again: the number also goes on the do-not-call list. Returns an error message, or None when saved."""
+        if outcome not in self.OUTCOME_CHOICES and not (dnd and outcome in ("", "dnd")):
             return "Unknown outcome"
+        outcome = outcome or "dnd"
         r = self.store.one("SELECT status, phone FROM leads WHERE id=?", (lead_id,))
         if not r:
             return "No such enquiry"
         if r["status"] == Status.CALLING.value:
             return "A call to this parent is in progress"
-        note = f"{self.OUTCOMES[outcome]} (marked by {who or 'a counselor'})"
+        note = f"{self.OUTCOMES[outcome]}{' - asked not to be disturbed' if dnd and outcome != 'dnd' else ''} (marked by {who or 'a counselor'})"
         status = Status.RESOLVED.value
-        if outcome == "dnd":
+        if dnd:
             status = Status.DO_NOT_CALL.value
             if r["phone"]:
                 self.store.add_dnc(r["phone"], now, f"asked not to be disturbed (marked by {who or 'a counselor'})")
         self.store.update_lead(lead_id, now, status=status, next_attempt_at=None, outcome=outcome, note=note[:300])
-        self.store.add_audit(now, who, "outcome", f"lead {lead_id}: {outcome}")
+        self.store.add_audit(now, who, "outcome", f"lead {lead_id}: {outcome}{' + do not disturb' if dnd else ''}")
         return None
 
     def report(self) -> dict:

@@ -305,7 +305,7 @@ def create_app(engine: Engine, clock=now_utc, run_loop: bool = False, loop_secon
         only = str(payload.get("campus", "") or "")                  # a campus-limited counselor may only mark their own campus's leads
         if only and not engine.store.one("SELECT 1 FROM leads WHERE id=? AND campus=?", (lead_id, only)):
             raise HTTPException(404, "no such lead")
-        err = engine.set_outcome(lead_id, clock(), str(payload.get("outcome", "")), str(payload.get("by", ""))[:40])
+        err = engine.set_outcome(lead_id, clock(), str(payload.get("outcome", "")), str(payload.get("by", ""))[:40], bool(payload.get("dnd")))
         if err:
             raise HTTPException(409 if "progress" in err else 400, err)
         return {"ok": True}
