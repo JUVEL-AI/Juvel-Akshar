@@ -1223,3 +1223,25 @@ def test_calling_card_shows_the_full_number_only_for_the_call_on_the_line():
     other = [x for x in live if x["phase"] != "calling"]
     assert on and on[0]["phone"].startswith("+91") and len(on[0]["phone"]) == 13
     assert all(x["phone"] == "" for x in other)
+
+
+def test_unchanged_sheet_is_not_re_read_into_the_database(monkeypatch):
+    from juvelcall import sheets_admin
+    e, s, d, n = mk()
+    rows = [{"d": "2026-11-26 09:00:00", "n": f"P{i}", "p": f"98765560{i:02d}", "c": "T.Nagar"} for i in range(3)]
+    cols = {"created_at": "d", "name": "n", "phone": "p", "campus": "c"}
+    monkeypatch.setattr(sheets_admin, "configured", lambda eng: [{"id": "x1", "label": "T", "spreadsheet_id": "s", "worksheet": "w", "columns": cols}])
+    monkeypatch.setattr(sheets_admin, "google_json", lambda eng: "{}")
+    monkeypatch.setattr(sheets_admin, "read_rows", lambda *a: rows)
+    sheets_admin.poll_all(e, MON_10AM)
+    seen = {"n": 0}
+    orig = e.ingest
+    def counting(*a, **k):
+        seen["n"] += 1
+        return orig(*a, **k)
+    monkeypatch.setattr(e, "ingest", counting)
+    out = sheets_admin.poll_all(e, MON_10AM + timedelta(minutes=1))
+    assert seen["n"] == 0 and out["T"].get("unchanged")
+    rows.append({"d": "2026-11-26 09:05:00", "n": "P9", "p": "9876556099", "c": "T.Nagar"})   # a new enquiry arrives
+    sheets_admin.poll_all(e, MON_10AM + timedelta(minutes=2))
+    assert seen["n"] == 1

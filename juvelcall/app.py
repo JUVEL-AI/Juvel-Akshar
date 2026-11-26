@@ -175,10 +175,18 @@ def create_app(engine: Engine, clock=now_utc, run_loop: bool = False, loop_secon
             out["periodic_error"] = str(e)[:200]
         return out
 
+    _console_cache: dict = {}
+
     @app.get("/api/console")
     def api_console(day: str | None = None, x_webhook_secret: str | None = Header(default=None)):
         auth(x_webhook_secret)
-        return console.trim(console.build(engine, clock(), day))
+        import time as _t                                              # several open dashboards share one database read for 8 seconds
+        hit = _console_cache.get(day or "")
+        if hit and _t.monotonic() - hit[0] < 8:
+            return hit[1]
+        out = console.trim(console.build(engine, clock(), day))
+        _console_cache[day or ""] = (_t.monotonic(), out)
+        return out
 
     @app.get("/api/control")
     def api_control_get(x_webhook_secret: str | None = Header(default=None)):

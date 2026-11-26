@@ -275,6 +275,15 @@ def poll_all(engine, now: datetime, budget: float = 35.0) -> dict:
                 continue
         first = not engine.store.kv_get(key)
         sf = str(s.get("start_from") or "").strip()
+        bf, bt = str(s.get("backfill_from") or ""), str(s.get("backfill_to") or "")
+        import hashlib                                   # nothing new in the sheet and nothing changed in its settings: skip the database work
+        fp = hashlib.sha1(json.dumps([len(leads), [x.key for x in leads[-3:]], sf, bf, bt, s["columns"]], sort_keys=True,
+                                     default=str).encode()).hexdigest()
+        if (not first and leads and engine.store.kv_get("sheet_fp_" + s["id"]) == fp
+                and (not (bf and bt) or engine.store.kv_get("sheet_backfill_" + s["id"]) == f"{bf}|{bt}")):
+            out[s["label"]] = {"new": 0, "unchanged": True}
+            _note_status(engine, s["id"], now, rows=len(rows), readable=len(leads), new=0, error="")
+            continue
         since = None
         if sf:
             since = datetime.strptime(sf, "%Y-%m-%d").replace(tzinfo=engine.cfg.tz)
@@ -285,7 +294,6 @@ def poll_all(engine, now: datetime, budget: float = 35.0) -> dict:
         res = engine.ingest(leads, now, baseline=first and since is None, since=since)
         if since:
             res["from_date"] = sf
-        bf, bt = str(s.get("backfill_from") or ""), str(s.get("backfill_to") or "")
         if bf and bt and engine.store.kv_get("sheet_backfill_" + s["id"]) != f"{bf}|{bt}":
             res["backfill"] = engine.revive_range("sheet_" + s["id"], datetime.strptime(bf, "%Y-%m-%d").replace(tzinfo=engine.cfg.tz),
                                                   datetime.strptime(bt, "%Y-%m-%d").replace(tzinfo=engine.cfg.tz), now,
@@ -295,6 +303,8 @@ def poll_all(engine, now: datetime, budget: float = 35.0) -> dict:
         if first:
             engine.store.kv_set(key, iso(now))
             res["baseline"] = since is None
+        if not (res.get("backfill") or {}).get("partial"):
+            engine.store.kv_set("sheet_fp_" + s["id"], fp)
         out[s["label"]] = res
         _note_status(engine, s["id"], now, rows=len(rows), readable=len(leads), new=res.get("new", 0),
                      error="" if leads else "no row could be read: check the columns chosen for this sheet")
