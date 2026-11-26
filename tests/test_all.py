@@ -1211,3 +1211,15 @@ def test_counselor_outcome_stops_calling_and_dnd_blocks_the_number():
     assert b["status"] == "DO_NOT_CALL" and s.is_dnc(b["phone"])
     assert e.set_outcome(ids[0], MON_10AM, "nonsense", "viji") == "Unknown outcome"
     assert e.tick(MON_10AM) == []                                      # neither parent is called
+
+
+def test_calling_card_shows_the_full_number_only_for_the_call_on_the_line():
+    from juvelcall import console
+    e, s, d, n = mk()
+    e.ingest([lead(f"f{i}", phone=f"98765540{i:02d}", at=MON_10AM, campus="tng") for i in range(2)], MON_10AM)
+    e.tick(MON_10AM)
+    live = console.build(e, MON_10AM + timedelta(seconds=20))["live"]
+    on = [x for x in live if x["phase"] == "calling"]
+    other = [x for x in live if x["phase"] != "calling"]
+    assert on and on[0]["phone"].startswith("+91") and len(on[0]["phone"]) == 13
+    assert all(x["phone"] == "" for x in other)

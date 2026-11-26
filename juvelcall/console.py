@@ -109,6 +109,7 @@ def build(engine, now: datetime, day: str | None = None, test: bool = False) -> 
             return {"id": r["id"], "phase": phase, "status": r["status"], "source": source_label(labels, r["source"]),
                     "parent": r["name"] or "", "student": r["student_name"] or "", "class": r["grade"] or "",
                     "campus": r["campus"] or "", "attempt": r["attempts"], "last4": (r["phone"] or "")[-4:],
+                    "phone": (r["phone"] or "") if phase == "calling" else "",       # the full number goes out only for the parent on the line now
                     "since": parse(r["updated_at"]).astimezone(cfg.tz).strftime("%H:%M")}
         for r in store.q("SELECT * FROM leads WHERE source<>'test' AND status=? AND updated_at>=? ORDER BY updated_at DESC",
                          (Status.CALLING.value, iso(now - timedelta(minutes=10)))):

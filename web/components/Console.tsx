@@ -19,6 +19,7 @@ const META: Record<string, { label: string; tone: string; bg: string; group: str
   RESOLVED: { label: "Done", tone: "#3DDC97", bg: "rgba(61,220,151,.10)", group: "other" },
   DO_NOT_CALL: { label: "Do not call", tone: "#8FA1B5", bg: "rgba(143,161,181,.12)", group: "other" },
 };
+const fmtPhone = (p: string) => (/^\+91\d{10}$/.test(p) ? `+91 ${p.slice(3, 8)} ${p.slice(8)}` : p);
 const meta = (s: string) => META[s] ?? { label: s, tone: "#8FA1B5", bg: "rgba(143,161,181,.12)", group: "other" };
 const FILTERS: [string, string][] = [["all", "All"], ["transferred", "Transferred"], ["retry", "Retrying"], ["callback", "Call back"], ["review", "Review"]];
 const mmss = (s: number | null) => (s === null ? "—" : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`);
@@ -305,7 +306,8 @@ export default function Console({ data, demo, error, pinRequired = false, role =
                 style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "baseline", padding: l.phase === "calling" ? "12px 10px" : "4px 0", fontSize: l.phase === "calling" ? 19 : 14, opacity: l.phase === "calling" ? 1 : 0.75, width: "100%", textAlign: "left", background: l.phase === "calling" ? "rgba(61,220,151,.12)" : "none", borderRadius: 8, border: 0, color: "inherit", cursor: "pointer" }}>
                 <span className="pill" style={{ color: tag.c, background: "rgba(255,255,255,.06)" }}>{tag.t}</span>
                 <b style={l.phase === "calling" ? { fontSize: 24 } : undefined}>{l.parent || "Parent"}</b>
-                {l.last4 && <span className="sub">••• {l.last4}</span>}
+                {l.phone ? <span className="mono" style={{ fontWeight: 700 }}>{fmtPhone(l.phone)}</span> : l.last4 && <span className="sub">••• {l.last4}</span>}
+                {l.phase === "calling" && (l.student || l["class"]) && <span>Student: <b>{l.student || "—"}</b>{l["class"] ? ` · ${l["class"]}` : ""}</span>}
                 <span>From <b>{l.source || "enquiry"}</b></span>
                 {Object.keys(data.campuses).length > 1 && <span className="sub">{data.campuses[l.campus] ?? l.campus}</span>}
                 <span className="sub">{l.phase === "next" ? "due within about a minute" : `called ${l.since}`}</span>

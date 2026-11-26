@@ -3,7 +3,7 @@ export type Lead = {
   id: number; time: string; parent: string; student: string; class: string; campus: string; phone: string;
   status: string; attempts: number; first_call_seconds: number | null; note: string; transferred_to: string; outcome?: string; calls?: CallRec[];
 };
-export type Live = { id: number; parent: string; student: string; class: string; campus: string; attempt: number; since: string; last4?: string; source?: string; phase?: "calling" | "recent" | "next"; status?: string };
+export type Live = { id: number; parent: string; student: string; class: string; campus: string; attempt: number; since: string; last4?: string; phone?: string; source?: string; phase?: "calling" | "recent" | "next"; status?: string };
 export type ConsoleData = {
   live?: Live[]; recall?: { waiting: number };
   generated_at: string; day: string; campuses: Record<string, string>;
