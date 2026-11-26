@@ -1066,7 +1066,9 @@ def test_dashboard_lists_older_enquiries_called_today():
     e.ingest([lead("old1", phone="9876544001", at=MON_10AM - timedelta(days=9)),
               lead("new1", phone="9876544002", at=MON_10AM - timedelta(minutes=1))], MON_10AM, since=since)
     e.tick(MON_10AM)
-    out = console.build(e, MON_10AM)
+    s.x("UPDATE leads SET status='NO_RESPONSE' WHERE status='CALLING'")           # one call at a time per campus: the next goes out a minute later
+    e.tick(MON_10AM + timedelta(seconds=70))
+    out = console.build(e, MON_10AM + timedelta(seconds=70))
     older = [l for l in out["leads"] if l["older"]]
     assert len(older) == 1 and out["kpis"]["older_called"] == 1 and out["kpis"]["enquiries"] == 1
 
@@ -1245,3 +1247,20 @@ def test_unchanged_sheet_is_not_re_read_into_the_database(monkeypatch):
     rows.append({"d": "2026-11-26 09:05:00", "n": "P9", "p": "9876556099", "c": "T.Nagar"})   # a new enquiry arrives
     sheets_admin.poll_all(e, MON_10AM + timedelta(minutes=2))
     assert seen["n"] == 1
+
+
+def test_queue_parked_puts_back_only_parents_never_called():
+    e, s, d, n = mk()
+    e.ingest([lead(f"q{i}", phone=f"98765570{i:02d}", at=MON_10AM, campus="tng") for i in range(4)], MON_10AM)
+    ids = [r["id"] for r in s.q("SELECT id FROM leads ORDER BY id")]
+    e.set_control("stop", MON_10AM, "t")
+    assert s.one("SELECT COUNT(*) n FROM leads WHERE status='NEEDS_REVIEW'")["n"] == 4
+    e.set_outcome(ids[1], MON_10AM, "admitted", "t")                                  # done by hand: stays done
+    s.update_lead(ids[2], MON_10AM, status="NEEDS_REVIEW", note="calling was stopped by an admin; please follow up by hand")
+    s.add_dnc(s.one("SELECT phone FROM leads WHERE id=?", (ids[3],))["phone"], MON_10AM, "x")
+    e.set_control("start", MON_10AM, "t")
+    out = e.queue_parked(MON_10AM, "priya")
+    assert out["queued"] == 2                                                         # ids[0] and ids[2]; not the done one, not the DNC one
+    assert s.one("SELECT status FROM leads WHERE id=?", (ids[0],))["status"] == "QUEUED"
+    assert s.one("SELECT status FROM leads WHERE id=?", (ids[3],))["status"] == "NEEDS_REVIEW"
+    assert e.queue_parked(MON_10AM, "priya")["queued"] == 0                           # pressing it twice changes nothing

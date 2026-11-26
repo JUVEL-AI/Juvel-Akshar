@@ -238,7 +238,7 @@ class Engine:
             return placed
         placed += self._advance_recall(now)
         rows = self.store.q(
-            "SELECT * FROM leads WHERE source<>'test' AND status IN (?,?) AND next_attempt_at<=? ORDER BY allow_old, next_attempt_at LIMIT ?",
+            "SELECT * FROM leads WHERE source<>'test' AND status IN (?,?) AND next_attempt_at<=? ORDER BY allow_old, next_attempt_at, id DESC LIMIT ?",
             (Status.QUEUED.value, Status.RETRY.value, iso(now), limit))
         pace = int(self.c.get("backfill_per_minute", 3) or 3)       # older enquiries (start-date catch-up) go out a few a minute
         caught_up = self.store.one(                       # older-enquiry calls already placed in the last 60 s (every webhook also runs a tick)
@@ -655,6 +655,31 @@ class Engine:
                                note=(note or "resolved by a person")[:300])
         self.store.add_audit(now, who, "mark_done", f"lead {lead_id}")
         return True
+
+    PARKED_NOTES = ("calling was stopped%", "arrived while calling was stopped%")
+
+    def queue_parked(self, now: datetime, who: str = "", campus: str = "") -> dict:
+        """Put back the enquiries that a Stop moved to Needs review. One enquiry per phone number; numbers that already have
+        an active or finished enquiry (transferred, no response, callback, done), are on the do-not-call list or have no valid
+        campus are left alone. Enquiries under 46 hours old go out as new ones; older ones follow at the paced rate."""
+        live = (Status.STALE.value, Status.DUPLICATE.value, Status.INVALID_PHONE.value, Status.DO_NOT_CALL.value, Status.NEEDS_REVIEW.value)
+        camps = [campus] if campus else list(self.cfg.campuses)
+        if not camps or any(c not in self.cfg.campuses for c in camps):
+            return {"queued": 0, "error": "unknown campus"}
+        where = (" FROM leads WHERE source<>'test' AND status=? AND phone IS NOT NULL AND phone<>'' AND campus IN (%s)"
+                 " AND (note LIKE ? OR note LIKE ?)"
+                 " AND phone NOT IN (SELECT phone FROM leads WHERE phone IS NOT NULL AND status NOT IN (%s))"
+                 " AND phone NOT IN (SELECT phone FROM dnc)"
+                 " AND id IN (SELECT MAX(id) FROM leads WHERE status=? GROUP BY phone)") % (",".join("?" * len(camps)), ",".join("?" * len(live)))
+        args = (Status.NEEDS_REVIEW.value, *camps, *self.PARKED_NOTES, *live, Status.NEEDS_REVIEW.value)
+        n = self.store.one("SELECT COUNT(*) n" + where, args)["n"]
+        if n:
+            cutoff = iso(now - timedelta(hours=46))
+            self.store.x("UPDATE leads SET status=?, allow_old=CASE WHEN created_at>=? THEN 0 ELSE 1 END, attempts=0, next_attempt_at=?, "
+                         "note='queued again by an admin', updated_at=? WHERE id IN (SELECT id" + where + ")",
+                         (Status.QUEUED.value, cutoff, iso(now), iso(now), *args))
+        self.store.add_audit(now, who, "queue_parked", f"{n} enquiries" + (f" ({campus})" if campus else ""))
+        return {"queued": n}
 
     OUTCOMES = {"admitted": "Admitted", "not_admitted": "Not admitted", "interested": "Interested, follow up", "dnd": "Do not disturb"}
 

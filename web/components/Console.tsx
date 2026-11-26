@@ -147,6 +147,15 @@ export default function Console({ data, demo, error, pinRequired = false, role =
     router.refresh();
   };
   const [recallMsg, setRecallMsg] = useState("");
+  const [parkMsg, setParkMsg] = useState("");
+  const queueParked = async () => {
+    if (demo || !window.confirm("Put back every parent who was parked when calling was stopped? They will be called one at a time, newest first, inside calling hours. Parents who were already called or are on the do-not-call list are skipped.")) return;
+    setParkMsg("Working…");
+    const r = await fetch("/api/queue-parked", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    const j = await r.json().catch(() => ({}));
+    setParkMsg(r.ok ? `${j.queued} parents queued. Make sure calling is ON.` : j.error || "Could not do that");
+    router.refresh();
+  };
   const recallWaiting = data.recall?.waiting ?? 0;
   const recall = async (ids: number[]) => {
     if (demo || !ids.length) return;
@@ -215,7 +224,9 @@ export default function Console({ data, demo, error, pinRequired = false, role =
           <button type="button" className="cbtn go" disabled={ctl === "running"} onClick={() => { setCtlErr(""); setAskCampus(""); setAsk("start"); }}>▶ Start</button>
           <button type="button" className="cbtn pause" disabled={ctl !== "running"} onClick={() => { setCtlErr(""); setAskCampus(""); setAsk("pause"); }}>⏸ Pause</button>
           <button type="button" className="cbtn stop" disabled={ctl === "stopped"} onClick={() => { setCtlErr(""); setAskCampus(""); setAsk("stop"); }}>⏹ Stop</button>
+          {!demo && <button type="button" className="cbtn" onClick={queueParked}>↻ Call parked parents</button>}
         </div>
+        {parkMsg && <div className="sub" role="status" style={{ marginTop: 6 }}>{parkMsg}</div>}
       </section>)}
 
       {Object.entries(data.campuses).map(([k, name]) => {

@@ -309,6 +309,14 @@ def create_app(engine: Engine, clock=now_utc, run_loop: bool = False, loop_secon
             raise HTTPException(409 if "progress" in err else 400, err)
         return {"ok": True}
 
+    @app.post("/api/queue-parked")
+    def api_queue_parked(payload: dict, x_webhook_secret: str | None = Header(default=None)):
+        auth(x_webhook_secret)
+        res = engine.queue_parked(clock(), str(payload.get("by", ""))[:40], str(payload.get("campus", "") or ""))
+        if res.get("error"):
+            raise HTTPException(400, res["error"])
+        return res
+
     @app.post("/api/recall")
     def api_recall(payload: dict, x_webhook_secret: str | None = Header(default=None)):
         auth(x_webhook_secret)
