@@ -131,6 +131,8 @@ sources:
       enabled: true
       backfill_from: "2026-05-01"          # the school also wants these older enquiries called once (paced)
       backfill_to: "2026-07-31"
+      year_column: "Applying-for-Academic-Year"     # only parents applying for this academic year (or later) are called
+      allowed_year: "2027-2028"
       columns: {created_at: "date", name: "fname", student_name: "namechild", phone: "fcontactno", campus: "preferred-campus", grade: "admission-sought", email: "femail"}
     - label: "Website form, new (SM Lead tab, stopped June 2026)"
       spreadsheet_id: "1hqnfahxY-agKd8NiJ4l3lpz8Q4W3DzRjUYQdhJO0iLY"

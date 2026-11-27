@@ -29,7 +29,7 @@ export default function SourcesForm({ initial }: { initial: SourcesData | null }
   const save = async () => {
     setBusy(true); setMsg(null);
     const res = await fetch("/api/sources", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
-      sheets: rows.map((r) => ({ id: r.id, label: r.label, spreadsheet: r.spreadsheet, worksheet: r.worksheet, columns: r.columns, enabled: r.enabled, start_from: r.start_from ?? "", backfill_from: r.backfill_from ?? "", backfill_to: r.backfill_to ?? "", skip_columns: r.skip_columns_txt ?? "", skip_words: r.skip_words_txt ?? "" })), default_campus: dc, date_order: order }) });
+      sheets: rows.map((r) => ({ id: r.id, label: r.label, spreadsheet: r.spreadsheet, worksheet: r.worksheet, columns: r.columns, enabled: r.enabled, start_from: r.start_from ?? "", backfill_from: r.backfill_from ?? "", backfill_to: r.backfill_to ?? "", skip_columns: r.skip_columns_txt ?? "", skip_words: r.skip_words_txt ?? "", year_column: r.year_column ?? "", allowed_year: r.allowed_year ?? "" })), default_campus: dc, date_order: order }) });
     const j = await res.json().catch(() => ({}));
     if (res.ok) { setD(j.view); setMsg({ ok: true, text: "Saved. A sheet added now is read once to note who is already in it. Only enquiries that arrive after that are called." }); }
     else setMsg({ ok: false, text: j.error || "Could not save" });
@@ -70,6 +70,13 @@ export default function SourcesForm({ initial }: { initial: SourcesData | null }
             <label className="set-col" style={{ flex: 1 }}>…any of these words
               <input value={r.skip_words_txt ?? ""} placeholder="not qualified, not interested, admitted (blank = standard list)" onChange={(e) => upd(i, { skip_words_txt: e.target.value })} /></label>
           </div>
+          <div className="set-row">
+            <label className="set-col" style={{ flex: 1 }}>Academic-year column
+              <input value={r.year_column ?? ""} placeholder="Applying-for-Academic-Year" onChange={(e) => upd(i, { year_column: e.target.value })} /></label>
+            <label className="set-col" style={{ flex: 1 }}>Call only this year or later
+              <input value={r.allowed_year ?? ""} placeholder="2027-2028" onChange={(e) => upd(i, { allowed_year: e.target.value })} /></label>
+          </div>
+          <p className="sub" style={{ margin: "0 0 6px" }}>Parents applying for an earlier year are closed and not called. A blank year is still called. Leave empty if the sheet has no year column.</p>
           <p className="sub" style={{ margin: "0 0 6px" }}>Leave the columns empty to turn this off. When a remark in the sheet matches, that parent is closed as “already worked on by the school” and is not called, even if the remark is added later.</p>
           <div className="set-row">
             <label className="set-col" style={{ flex: 2 }}>Google Sheet link

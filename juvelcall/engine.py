@@ -678,7 +678,7 @@ class Engine:
         self.store.add_audit(now, who, "mark_done", f"lead {lead_id}")
         return True
 
-    def apply_skips(self, source: str, flags: dict, now: datetime) -> int:
+    def apply_skips(self, source: str, flags: dict, now: datetime, why: str = "already worked on by the school") -> int:
         """The school's sheet remarks say it already worked on these parents (for example 'Not qualified'): they are closed
         and never called. Only parents still waiting are touched; a parent already called or transferred is left alone."""
         keys, done = list(flags), 0
@@ -688,7 +688,7 @@ class Engine:
             for r in self.store.q("SELECT id, key FROM leads WHERE source=? AND key IN (%s) AND status IN (?,?,?,?)" % ",".join("?" * len(chunk)),
                                   (source, *chunk, *waiting)):
                 self.store.update_lead(r["id"], now, status=Status.RESOLVED.value, next_attempt_at=None,
-                                       note=f"already worked on by the school: {flags[r['key']]}"[:300])
+                                       note=f"{why}: {flags[r['key']]}"[:300])
                 done += 1
         return done
 

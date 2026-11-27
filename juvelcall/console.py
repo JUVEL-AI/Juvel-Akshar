@@ -52,6 +52,39 @@ def trim(out: dict, limit: int = 3_000_000) -> dict:
     return out
 
 
+def live_cards(engine, now: datetime, labels: dict | None = None) -> list:
+    """The calling card: ONE card per campus, the parent of the latest call, until the next call is placed.
+    Small and cheap, so the dashboard can ask for it every few seconds."""
+    from .store import iso
+    cfg, store = engine.cfg, engine.store
+    labels = labels if labels is not None else source_labels(engine)
+    live = []
+    seen = set()
+    for r in store.q("SELECT l.*, c.started_at c_start, c.ended_at c_end, c.outcome c_outcome FROM calls c JOIN leads l ON l.id=c.lead_id "
+                     "WHERE l.source<>'test' AND c.started_at>=? ORDER BY c.started_at DESC",
+                     (iso(now - timedelta(seconds=CONNECTED_SHOW_SECONDS)),)):
+        if r["campus"] in seen:
+            continue
+        seen.add(r["campus"])                             # only the latest call of each campus can be on a card
+        started, ended = parse(r["c_start"]), parse(r["c_end"])
+        if not r["c_outcome"]:
+            phase, age = "calling", now - started
+            if age > timedelta(minutes=10):               # a call that never reported back does not show forever
+                continue
+        elif r["c_outcome"] == "TRANSFERRED":
+            phase = "connected"
+        else:
+            phase = "not_connected"
+            if now - (ended or started) > timedelta(seconds=NOT_CONNECTED_SHOW_SECONDS):
+                continue
+        live.append({"id": r["id"], "phase": phase, "status": r["status"], "source": source_label(labels, r["source"]),
+                     "parent": r["name"] or "", "student": r["student_name"] or "", "class": r["grade"] or "",
+                     "campus": r["campus"] or "", "attempt": r["attempts"], "last4": (r["phone"] or "")[-4:],
+                     "phone": r["phone"] or "",
+                     "since": started.astimezone(cfg.tz).strftime("%H:%M")})
+    return live
+
+
 def build(engine, now: datetime, day: str | None = None, test: bool = False) -> dict:
     cfg, store = engine.cfg, engine.store
     local_now = now.astimezone(cfg.tz)
@@ -103,31 +136,7 @@ def build(engine, now: datetime, day: str | None = None, test: bool = False) -> 
     hours = Counter(int(l["time"][:2]) for l in fresh)
     attention = [l for l in leads if l["status"] in
                  ("ANSWERED_NOT_TRANSFERRED", "NEEDS_REVIEW", "NO_RESPONSE", "INVALID_PHONE", "STALE")]
-    live = []
-    if not test:                      # the calling card: ONE card per campus, the parent of the latest call, until the next call is placed
-        seen = set()
-        for r in store.q("SELECT l.*, c.started_at c_start, c.ended_at c_end, c.outcome c_outcome FROM calls c JOIN leads l ON l.id=c.lead_id "
-                         "WHERE l.source<>'test' AND c.started_at>=? ORDER BY c.started_at DESC",
-                         (iso(now - timedelta(seconds=CONNECTED_SHOW_SECONDS)),)):
-            if r["campus"] in seen:
-                continue
-            seen.add(r["campus"])                             # only the latest call of each campus can be on a card
-            started, ended = parse(r["c_start"]), parse(r["c_end"])
-            if not r["c_outcome"]:
-                phase, age = "calling", now - started
-                if age > timedelta(minutes=10):               # a call that never reported back does not show forever
-                    continue
-            elif r["c_outcome"] == "TRANSFERRED":
-                phase = "connected"
-            else:
-                phase = "not_connected"
-                if now - (ended or started) > timedelta(seconds=NOT_CONNECTED_SHOW_SECONDS):
-                    continue
-            live.append({"id": r["id"], "phase": phase, "status": r["status"], "source": source_label(labels, r["source"]),
-                         "parent": r["name"] or "", "student": r["student_name"] or "", "class": r["grade"] or "",
-                         "campus": r["campus"] or "", "attempt": r["attempts"], "last4": (r["phone"] or "")[-4:],
-                         "phone": r["phone"] or "",
-                         "since": started.astimezone(cfg.tz).strftime("%H:%M")})
+    live = [] if test else live_cards(engine, now, labels)
     return {
         "recall": {"waiting": len(engine._recall_queue())},
         "live": live,

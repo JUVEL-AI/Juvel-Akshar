@@ -42,6 +42,26 @@ def _skip_reason(row: dict, cols: list[str], words: list[str]) -> str:
     return ""
 
 
+def year_start(v) -> int | None:
+    """First year of an academic year as written in a sheet: '2027-2028', '2027-28', '2027 - 2028', '2027' all give 2027."""
+    m = re.search(r"(?<!\d)(20\d{2})(?!\d)", str(v or ""))
+    return int(m.group(1)) if m else None
+
+
+def _year_reason(row: dict, col: str, allowed: str) -> str:
+    """Closed when the parent is applying for an academic year earlier than the allowed one. A blank or unreadable year is called."""
+    want, base = year_start(allowed), re.sub(r"\s+", " ", col).strip().lower()
+    if not (want and base):
+        return ""
+    for h, v in row.items():                              # a repeated heading is read as 'Name.1': the first filled one wins
+        if re.sub(r"\.\d+$", "", re.sub(r"\s+", " ", str(h)).strip()).lower() == base and str(v or "").strip():
+            y = year_start(v)
+            if y is not None and y < want:
+                return f"applying for academic year {str(v).strip()[:12]}, not {allowed}"
+            return ""
+    return ""
+
+
 def parse_sheet_id(text: str) -> str:
     t = (text or "").strip()
     m = ID_RE.search(t)
@@ -223,9 +243,15 @@ def validate(engine, payload: dict) -> dict:
             if a > b:
                 raise ValueError(f"{label}: the older-enquiries 'from' date is after its 'to' date")
         sk_cols, sk_words = _as_list(s.get("skip_columns"), 6, 60), [w.lower() for w in _as_list(s.get("skip_words"), 30, 40)]
+        yc, ay = str(s.get("year_column") or "").strip()[:60], str(s.get("allowed_year") or "").strip()[:20]
+        if bool(yc) != bool(ay):
+            raise ValueError(f"{label}: fill both the academic-year column and the year to call (for example 2027-2028), or neither")
+        if ay and year_start(ay) is None:
+            raise ValueError(f"{label}: the academic year must look like 2027-2028")
         out["sheets"].append({"id": str(s.get("id") or sid[:8] + str(i)), "label": label, "spreadsheet_id": sid,
                               "worksheet": ws, "columns": cols, "enabled": bool(s.get("enabled", True)), "start_from": sf,
-                              "backfill_from": bf, "backfill_to": bt, "skip_columns": sk_cols, "skip_words": sk_words})
+                              "backfill_from": bf, "backfill_to": bt, "skip_columns": sk_cols, "skip_words": sk_words,
+                              "year_column": yc, "allowed_year": ay})
     dc = str(payload.get("default_campus", "") or "").strip()
     if dc and dc not in engine._base["campuses"]:
         raise ValueError("Unknown default campus")
@@ -292,6 +318,8 @@ def poll_all(engine, now: datetime, budget: float = 35.0) -> dict:
             _note_status(engine, s["id"], now, error=_friendly(e, creds))
             continue
         leads = []
+        yflags: dict = {}                                 # parents applying for an earlier academic year: never called
+        yc, ay = str(s.get("year_column") or ""), str(s.get("allowed_year") or "")
         flags: dict = {}                                  # parents the school already worked on (their remarks say so): never called
         sk_cols = s.get("skip_columns") or []
         sk_words = [w.lower() for w in (s.get("skip_words") or DEFAULT_SKIP_WORDS)]
@@ -302,6 +330,10 @@ def poll_all(engine, now: datetime, budget: float = 35.0) -> dict:
             except Exception:
                 continue
             leads.append(lead)
+            if yc and ay:
+                yw = _year_reason(row, yc, ay)
+                if yw:
+                    yflags[lead.key] = yw
             if sk_cols:
                 why = _skip_reason(row, sk_cols, sk_words)
                 if why:
@@ -310,7 +342,7 @@ def poll_all(engine, now: datetime, budget: float = 35.0) -> dict:
         sf = str(s.get("start_from") or "").strip()
         bf, bt = str(s.get("backfill_from") or ""), str(s.get("backfill_to") or "")
         import hashlib                                   # nothing new in the sheet and nothing changed in its settings: skip the database work
-        fp = hashlib.sha1(json.dumps([len(leads), [x.key for x in leads[-3:]], sf, bf, bt, s["columns"], sorted(flags.items()), sk_cols, sk_words], sort_keys=True,
+        fp = hashlib.sha1(json.dumps([len(leads), [x.key for x in leads[-3:]], sf, bf, bt, s["columns"], sorted(flags.items()), sk_cols, sk_words, sorted(yflags.items()), yc, ay], sort_keys=True,
                                      default=str).encode()).hexdigest()
         if (not first and leads and engine.store.kv_get("sheet_fp_" + s["id"]) == fp
                 and (not (bf and bt) or engine.store.kv_get("sheet_backfill_" + s["id"]) == f"{bf}|{bt}")):
@@ -327,6 +359,8 @@ def poll_all(engine, now: datetime, budget: float = 35.0) -> dict:
         res = engine.ingest(leads, now, baseline=first and since is None, since=since)
         if flags:
             res["skipped_by_remarks"] = engine.apply_skips("sheet_" + s["id"], flags, now)
+        if yflags:
+            res["skipped_by_year"] = engine.apply_skips("sheet_" + s["id"], yflags, now, "applying for an earlier year")
         if since:
             res["from_date"] = sf
         if bf and bt and engine.store.kv_get("sheet_backfill_" + s["id"]) != f"{bf}|{bt}":

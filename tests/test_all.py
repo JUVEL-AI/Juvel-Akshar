@@ -1349,3 +1349,32 @@ def test_downloads_can_be_limited_to_one_campus():
     log = ops.export_calls_csv(e, None, MON_10AM + timedelta(minutes=2), "t_nagar")
     assert "T Nagar" in log and "ECR" not in log
     assert ops.view_settings(e)["staff_download"] is True if hasattr(ops, "view_settings") else True
+
+
+def test_live_cards_feed_matches_the_dashboard_card():
+    from juvelcall import console
+    e, s, d, n = mk()
+    e.ingest([lead("lv1", phone="9876590001", campus="tng"), lead("lv2", phone="9876590002", campus="ecr_campus")], MON_10AM)
+    e.tick(MON_10AM)
+    assert console.live_cards(e, MON_10AM + timedelta(seconds=5)) == console.build(e, MON_10AM + timedelta(seconds=5))["live"]
+    assert len(console.live_cards(e, MON_10AM + timedelta(seconds=5))) == 2             # one card per campus
+
+
+def test_parents_applying_for_an_earlier_year_are_not_called(monkeypatch):
+    from juvelcall import sheets_admin
+    assert [sheets_admin.year_start(x) for x in ("2027-2028", "2027-28", "2027 - 2028", "2027", "", "abc")] == [2027, 2027, 2027, 2027, None, None]
+    e, s, d, n = mk()
+    rows = [{"d": "2026-11-26 09:00:00", "n": "Old", "p": "9876580001", "c": "T.Nagar", "Year": "2026-27"},
+            {"d": "2026-11-26 09:01:00", "n": "Right", "p": "9876580002", "c": "T.Nagar", "Year": "2027 - 2028"},
+            {"d": "2026-11-26 09:02:00", "n": "Blank", "p": "9876580003", "c": "ECR", "Year": ""},
+            {"d": "2026-11-26 09:03:00", "n": "Dup", "p": "9876580004", "c": "ECR", "Year": "", "Year.1": "2025"}]
+    cols = {"created_at": "d", "name": "n", "phone": "p", "campus": "c"}
+    sheet = {"id": "y1", "label": "T", "spreadsheet_id": "s", "worksheet": "w", "columns": cols, "year_column": "year", "allowed_year": "2027-2028"}
+    monkeypatch.setattr(sheets_admin, "configured", lambda eng: [sheet])
+    monkeypatch.setattr(sheets_admin, "google_json", lambda eng: "{}")
+    monkeypatch.setattr(sheets_admin, "read_rows", lambda *a: rows)
+    sheets_admin.poll_all(e, MON_10AM)
+    st = {r["name"]: r for r in s.q("SELECT name,status,note FROM leads")}
+    assert st["Old"]["status"] == "RESOLVED" and "2026-27" in st["Old"]["note"]
+    assert st["Right"]["status"] != "RESOLVED" and st["Blank"]["status"] != "RESOLVED"
+    assert st["Dup"]["status"] == "RESOLVED"

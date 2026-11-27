@@ -176,6 +176,15 @@ def create_app(engine: Engine, clock=now_utc, run_loop: bool = False, loop_secon
         return out
 
     _console_cache: dict = {}
+    _live_cache: list = [0.0, []]
+
+    @app.get("/api/live")
+    def api_live(x_webhook_secret: str | None = Header(default=None)):
+        auth(x_webhook_secret)
+        import time as _t                                              # tiny: the calling card only, shared for 2 seconds
+        if _t.monotonic() - _live_cache[0] > 2:
+            _live_cache[:] = [_t.monotonic(), console.live_cards(engine, clock())]
+        return {"live": _live_cache[1]}
 
     @app.get("/api/console")
     def api_console(day: str | None = None, x_webhook_secret: str | None = Header(default=None)):

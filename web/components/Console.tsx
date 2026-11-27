@@ -85,8 +85,26 @@ export default function Console({ data, demo, error, pinRequired = false, role =
   };
 
   useEffect(() => { const t = setInterval(() => setStage((s) => (s + 1) % 4), 2600); return () => clearInterval(t); }, []);
-  const liveNow = (data.live ?? []).filter((l) => campus === "all" || l.campus === campus);
-  useEffect(() => { if (demo) return; const t = setInterval(() => { if (document.visibilityState === "visible") router.refresh(); }, liveNow.length ? 8000 : 30000); return () => clearInterval(t); }, [demo, router, liveNow.length]);
+  const [fastLive, setFastLive] = useState<{ at: string; live: NonNullable<ConsoleData["live"]> } | null>(null);
+  const useFast = fastLive && fastLive.at === data.generated_at ? fastLive.live : null;                 // the small feed, until the full page catches up
+  const liveNow = (useFast ?? data.live ?? []).filter((l) => campus === "all" || l.campus === campus);
+  useEffect(() => { if (demo) return; const t = setInterval(() => { if (document.visibilityState === "visible") router.refresh(); }, 30000); return () => clearInterval(t); }, [demo, router]);
+  useEffect(() => {                                            // the calling card asks for itself every 3 seconds, so it matches the phone
+    if (demo) return;
+    let stop = false;
+    const tick = async () => {
+      if (document.visibilityState !== "visible") return;
+      try {
+        const r = await fetch("/api/live", { cache: "no-store" });
+        if (!r.ok) return;
+        const j = await r.json();
+        if (!stop && Array.isArray(j.live)) setFastLive({ at: data.generated_at, live: j.live });
+      } catch { /* the next try will do */ }
+    };
+    tick();
+    const t = setInterval(tick, 3000);
+    return () => { stop = true; clearInterval(t); };
+  }, [demo, data.generated_at]);
 
   const label = (k: string) => data.campuses[k] ?? (k ? k : "Campus unknown");
   const inCampus = useMemo(() => data.leads.filter((l) => campus === "all" || l.campus === campus), [data, campus]);
