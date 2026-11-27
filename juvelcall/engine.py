@@ -740,6 +740,8 @@ class Engine:
             status = Status.DO_NOT_CALL.value
             if r["phone"]:
                 self.store.add_dnc(r["phone"], now, f"asked not to be disturbed (marked by {who or 'a counselor'})")
+        if r["status"] == Status.TRANSFERRED.value:
+            status = Status.TRANSFERRED.value            # a parent who reached the counselor stays counted as connected; the outcome is kept beside it
         self.store.update_lead(lead_id, now, status=status, next_attempt_at=None, outcome=outcome, note=note[:300])
         self.store.add_audit(now, who, "outcome", f"lead {lead_id}: {outcome}{' + do not disturb' if dnd else ''}")
         return None

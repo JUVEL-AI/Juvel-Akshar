@@ -1320,3 +1320,19 @@ def test_parents_the_school_already_worked_on_are_not_called(monkeypatch):
     rows[2]["Lead Quality "] = "not interested"                                            # the school writes a remark later
     sheets_admin.poll_all(e, MON_10AM + timedelta(minutes=1))
     assert s.one("SELECT status FROM leads WHERE name='Later'")["status"] == "RESOLVED"
+
+
+def test_saving_an_outcome_does_not_uncount_a_connected_call():
+    from juvelcall import console
+    e, s, d, n = mk()
+    e.ingest([lead("k1", phone="9876570001", at=MON_10AM, campus="tng")], MON_10AM)
+    e.tick(MON_10AM)
+    lid = s.one("SELECT id FROM leads")["id"]
+    s.x("UPDATE calls SET outcome='TRANSFERRED', ended_at=?", ((MON_10AM + timedelta(seconds=90)).isoformat(),))
+    s.x("UPDATE leads SET status='TRANSFERRED' WHERE id=?", (lid,))
+    assert e.set_outcome(lid, MON_10AM + timedelta(minutes=5), "needs_time", "viji") is None
+    assert s.one("SELECT status, outcome FROM leads WHERE id=?", (lid,)) == {"status": "TRANSFERRED", "outcome": "needs_time"} or \
+        (s.one("SELECT status FROM leads WHERE id=?", (lid,))["status"] == "TRANSFERRED")
+    assert console.build(e, MON_10AM + timedelta(minutes=6))["kpis"]["transferred"] == 1
+    s.x("UPDATE leads SET status='RESOLVED' WHERE id=?", (lid,))                 # rows already changed by the earlier build still count
+    assert console.build(e, MON_10AM + timedelta(minutes=6))["kpis"]["transferred"] == 1

@@ -142,7 +142,7 @@ def build(engine, now: datetime, day: str | None = None, test: bool = False) -> 
         "kpis": {"enquiries": len(fresh), "older_called": len(leads) - len(fresh), "called": len(called),
                  "called_within_5_min_pct": round(fast * 100 / len(called)) if called else 0,
                  "median_first_call_seconds": secs[len(secs) // 2] if secs else 0,
-                 "transferred": cnt["TRANSFERRED"], "callbacks_needed": cnt["ANSWERED_NOT_TRANSFERRED"]},
+                 "transferred": sum(1 for l in leads if l["status"] == "TRANSFERRED" or any(c["outcome"] == "TRANSFERRED" for c in l["calls"])), "callbacks_needed": cnt["ANSWERED_NOT_TRANSFERRED"]},
         "outcomes": dict(cnt), "by_hour": dict(sorted(hours.items())),
         "attention": attention, "leads": leads}
 

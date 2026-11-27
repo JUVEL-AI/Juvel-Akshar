@@ -89,7 +89,8 @@ export default function Console({ data, demo, error, pinRequired = false, role =
 
   const label = (k: string) => data.campuses[k] ?? (k ? k : "Campus unknown");
   const inCampus = useMemo(() => data.leads.filter((l) => campus === "all" || l.campus === campus), [data, campus]);
-  const rows = inCampus.filter((l) => filter === "all" || meta(l.status).group === filter);
+  const reached = (l: Lead) => l.status === "TRANSFERRED" || (l.calls ?? []).some((c) => c.outcome === "TRANSFERRED");   // still counted after the counselor saves an outcome
+  const rows = inCampus.filter((l) => filter === "all" || (filter === "transferred" ? reached(l) : meta(l.status).group === filter));
   const per = pageSize === "all" ? Math.max(rows.length, 1) : Number(pageSize);
   const pages = Math.max(1, Math.ceil(rows.length / per));
   const pg = Math.min(page, pages - 1);
@@ -101,7 +102,7 @@ export default function Console({ data, demo, error, pinRequired = false, role =
   const pct = called.length ? Math.round((fast * 100) / called.length) : 0;
   const secs = called.map((l) => l.first_call_seconds as number).sort((a, b) => a - b);
   const med = secs.length ? secs[Math.floor(secs.length / 2)] : 0;
-  const tr = inCampus.filter((l) => l.status === "TRANSFERRED").length;
+  const tr = inCampus.filter(reached).length;
   const cb = inCampus.filter((l) => l.status === "ANSWERED_NOT_TRANSFERRED").length;
   const share = inCampus.length ? Math.round((tr * 100) / inCampus.length) : 0;
   const kpis = [
