@@ -53,6 +53,7 @@ function timeline(l: Lead, campusLabel: string) {
 
 export default function Console({ data, demo, error, pinRequired = false, role = "admin", user = "", day }: { data: ConsoleData; demo: boolean; error?: string; pinRequired?: boolean; role?: "super" | "admin" | "staff"; user?: string; day?: string }) {
   const admin = role !== "staff";
+  const canDownload = !demo && (admin || (data.staff_download !== false && Object.keys(data.campuses).length === 1));   // staff limited to one campus get their own campus's files
   const superAdmin = role === "super";
   const router = useRouter();
   const [campus, setCampus] = useState("all");
@@ -290,8 +291,8 @@ export default function Console({ data, demo, error, pinRequired = false, role =
         <input type="date" aria-label="Day" value={day ?? data.day.slice(0, 10)} disabled={demo}
           onChange={(e) => e.target.value && router.push(`/?day=${e.target.value}`)} />
         <input type="search" aria-label="Search parent, student or phone" placeholder="Search parent, student or last digits of a phone…" value={q} onChange={(e) => setQ(e.target.value)} />
-        {admin && !demo && <a className="cbtn" style={{ textDecoration: "none" }} href={`/api/export${day ? `?day=${day}` : ""}`}>⬇ Download Excel (CSV)</a>}
-        {admin && !demo && <a className="cbtn" style={{ textDecoration: "none" }} href={`/api/export?kind=calls${day ? `&day=${day}` : ""}`}>⬇ Download call log (every call)</a>}
+        {canDownload && <a className="cbtn" style={{ textDecoration: "none" }} href={`/api/export${day ? `?day=${day}` : ""}`}>⬇ Download Excel (CSV)</a>}
+        {canDownload && <a className="cbtn" style={{ textDecoration: "none" }} href={`/api/export?kind=calls${day ? `&day=${day}` : ""}`}>⬇ Download call log (every call)</a>}
       </div>
       {found && (
         <section className="card srch" aria-label="Search results">

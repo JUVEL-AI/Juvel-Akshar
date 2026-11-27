@@ -17,7 +17,7 @@ export async function loadConsole(day?: string): Promise<{ data: ConsoleData; de
 export type SettingsData = {
   hours: Record<string, [string, string] | null>; retry_minutes: number[]; max_attempts: number;
   campuses: Record<string, { label: string; alert_emails: string[]; counselors: { name: string; number: string; on_duty: boolean }[] }>;
-  admin_emails: string[]; records_staff?: boolean;
+  admin_emails: string[]; records_staff?: boolean; staff_download?: boolean;
 };
 export type AuditRow = { at: string; who: string; action: string; detail: string };
 

@@ -254,10 +254,16 @@ def create_app(engine: Engine, clock=now_utc, run_loop: bool = False, loop_secon
         return ops.search(engine, q, campus=campus)
 
     @app.get("/api/export")
-    def api_export(day: str | None = None, by: str = "dashboard", kind: str = "enquiries", x_webhook_secret: str | None = Header(default=None)):
+    def api_export(day: str | None = None, by: str = "dashboard", kind: str = "enquiries", campus: str = "", staff: int = 0,
+                   x_webhook_secret: str | None = Header(default=None)):
         auth(x_webhook_secret)
-        engine.store.add_audit(clock(), by[:40], "export" if kind != "calls" else "export_calls", day or "today")
-        body = ops.export_calls_csv(engine, day, clock()) if kind == "calls" else ops.export_csv(engine, day, clock())
+        if staff:                                                       # a campus-limited counselor: only if an admin allows it, only their campus
+            if not campus or campus not in engine.cfg.campuses:
+                raise HTTPException(403, "a campus is needed")
+            if not ops._stored(engine).get("staff_download", True):
+                raise HTTPException(403, "downloads are switched off for staff")
+        engine.store.add_audit(clock(), by[:40], "export" if kind != "calls" else "export_calls", (day or "today") + (f" ({campus})" if campus else ""))
+        body = ops.export_calls_csv(engine, day, clock(), campus) if kind == "calls" else ops.export_csv(engine, day, clock(), campus)
         return Response(body, media_type="text/csv; charset=utf-8")
 
     @app.get("/api/test")

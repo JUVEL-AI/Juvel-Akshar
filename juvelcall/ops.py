@@ -259,6 +259,7 @@ def effective_settings(engine) -> dict:
                      for k, v in cfg.campuses.items()},
         "admin_emails": list(cfg.notifications.get("admin_emails", [])),
         "records_staff": bool(_stored(engine).get("records_staff", False)),
+        "staff_download": bool(_stored(engine).get("staff_download", True)),
     }
 
 
@@ -293,6 +294,8 @@ def validate_settings(engine, payload: dict) -> dict:
         out["retry_minutes"] = r
     if "records_staff" in payload:
         out["records_staff"] = bool(payload["records_staff"])
+    if "staff_download" in payload:
+        out["staff_download"] = bool(payload["staff_download"])
     if "campuses" in payload:
         camps = {}
         for key, ov in (payload["campuses"] or {}).items():
@@ -491,12 +494,14 @@ def periodic(engine, now: datetime) -> dict:
 
 
 # ---------------- export / search ----------------
-def export_csv(engine, day: str | None, now: datetime) -> str:
+def export_csv(engine, day: str | None, now: datetime, campus: str = "") -> str:
     cfg = engine.cfg
     local = now.astimezone(cfg.tz)
     start = (datetime.fromisoformat(day).replace(tzinfo=cfg.tz) if day
              else local.replace(hour=0, minute=0, second=0, microsecond=0))
     rows, first = _day_rows(engine, start), _first_call_seconds(engine)
+    if campus:                                                  # a campus-limited counselor gets only their own campus
+        rows = [r for r in rows if r["campus"] == campus]
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(["Time", "Parent", "Student", "Class", "Campus", "Phone", "Status", "Attempts",
@@ -513,7 +518,7 @@ CALL_RESULT = {"TRANSFERRED": "Connected to counselor", "TRANSFER_FAILED": "Pare
                "ANSWERED": "Parent answered", "NO_ANSWER": "No answer", "BUSY": "Busy", "FAILED": "Failed to connect"}
 
 
-def export_calls_csv(engine, day: str | None, now: datetime) -> str:
+def export_calls_csv(engine, day: str | None, now: datetime, campus: str = "") -> str:
     """One row per call attempt made on the day (by call time), whatever the outcome: connected, not connected, busy, failed.
     Includes older enquiries called that day."""
     cfg = engine.cfg
@@ -523,8 +528,8 @@ def export_calls_csv(engine, day: str | None, now: datetime) -> str:
     rows = engine.store.q(
         "SELECT c.started_at, c.attempt, c.outcome, c.ended_reason, c.duration_seconds, l.name, l.student_name, l.grade, l.campus, "
         "l.phone, l.phone_raw, l.transferred_to, l.created_at, l.status, l.outcome AS lead_outcome FROM calls c JOIN leads l ON l.id=c.lead_id "
-        "WHERE c.started_at>=? AND c.started_at<? AND l.source<>'test' ORDER BY c.started_at",
-        (iso(start), iso(start + timedelta(days=1))))
+        "WHERE c.started_at>=? AND c.started_at<? AND l.source<>'test'" + (" AND l.campus=?" if campus else "") + " ORDER BY c.started_at",
+        (iso(start), iso(start + timedelta(days=1))) + ((campus,) if campus else ()))
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(["Call time", "Parent", "Student", "Class", "Campus", "Phone", "Enquiry date", "Attempt", "Result",

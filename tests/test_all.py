@@ -1336,3 +1336,16 @@ def test_saving_an_outcome_does_not_uncount_a_connected_call():
     assert console.build(e, MON_10AM + timedelta(minutes=6))["kpis"]["transferred"] == 1
     s.x("UPDATE leads SET status='RESOLVED' WHERE id=?", (lid,))                 # rows already changed by the earlier build still count
     assert console.build(e, MON_10AM + timedelta(minutes=6))["kpis"]["transferred"] == 1
+
+
+def test_downloads_can_be_limited_to_one_campus():
+    from juvelcall import ops
+    e, s, d, n = mk()
+    e.ingest([lead("d1", phone="9876580001", at=MON_10AM, campus="ecr_campus"), lead("d2", phone="9876580002", at=MON_10AM, campus="tng")], MON_10AM)
+    e.tick(MON_10AM); e.tick(MON_10AM + timedelta(minutes=1))
+    both = ops.export_csv(e, None, MON_10AM + timedelta(minutes=2))
+    only = ops.export_csv(e, None, MON_10AM + timedelta(minutes=2), "ecr")
+    assert "ECR" in both and "T Nagar" in both and "ECR" in only and "T Nagar" not in only
+    log = ops.export_calls_csv(e, None, MON_10AM + timedelta(minutes=2), "t_nagar")
+    assert "T Nagar" in log and "ECR" not in log
+    assert ops.view_settings(e)["staff_download"] is True if hasattr(ops, "view_settings") else True

@@ -17,7 +17,7 @@ export default function SettingsForm({ initial, audit }: { initial: SettingsData
   const save = async () => {
     setBusy(true); setMsg(null);
     const r = await fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
-      hours: s.hours, max_attempts: s.max_attempts, retry_minutes: s.retry_minutes, records_staff: !!s.records_staff,
+      hours: s.hours, max_attempts: s.max_attempts, retry_minutes: s.retry_minutes, records_staff: !!s.records_staff, staff_download: s.staff_download !== false,
       campuses: Object.fromEntries(Object.entries(s.campuses).map(([k, c]) => [k, { alert_emails: c.alert_emails, counselors: c.counselors }])) }) });
     const j = await r.json().catch(() => ({}));
     if (r.ok) { setS(j.settings); setMsg({ ok: true, text: "Saved. New settings apply to the next call." }); }
@@ -67,6 +67,11 @@ export default function SettingsForm({ initial, audit }: { initial: SettingsData
         <label className="set-col" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <input type="checkbox" checked={!!s.records_staff} onChange={(e) => setS({ ...s, records_staff: e.target.checked })} />
           Let staff hear recordings and read transcripts
+        </label>
+        <p className="sub" style={{ marginTop: 12 }}>Downloads contain full phone numbers. Staff limited to one campus can download only that campus's files, and every download is logged.</p>
+        <label className="set-col" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <input type="checkbox" checked={s.staff_download !== false} onChange={(e) => setS({ ...s, staff_download: e.target.checked })} />
+          Let staff download their campus's enquiries and call log
         </label>
       </section>
 

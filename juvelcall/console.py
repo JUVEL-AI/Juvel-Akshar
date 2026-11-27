@@ -133,6 +133,7 @@ def build(engine, now: datetime, day: str | None = None, test: bool = False) -> 
         "live": live,
         "generated_at": now.isoformat(), "day": day_start.date().isoformat(), "control": engine.control_info(),
         "records_staff": bool(ops._stored(engine).get("records_staff", False)),
+        "staff_download": bool(ops._stored(engine).get("staff_download", True)),
         "hours_label": ops.hours_label(cfg.calling),
         "campus_status": {k: {"label": v["label"], "on_duty": (engine._on_duty(k) or {}).get("name"),
                               "counselors": [{"name": c["name"], "number": (c["numbers"] or [""])[0],
