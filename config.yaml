@@ -115,7 +115,7 @@ sources:
   presets:                                 # the school's real sheets: the Lead sheets page offers them with one click (confirmed from their exports)
     - label: "Meta leads (AAIS Leads)"
       spreadsheet_id: "1qSsvxlDE639YOw6wsi_Tv_d4IzYhMBIL52B7hwgM59w"
-      worksheet: "Sheet1"
+      worksheet: "Meta"
       enabled: true
       columns: {created_at: "Timing", name: "full_name", phone: "phone_number", campus: "which_campus_are_you_enquiring_for?", grade: "which_grade_is_your_child_currently_studying_in?", grade_alt: "which_school_is_your_child_currently_studying_in?", email: "email", city: "city"}
       skip_columns: ["Lead Quality", "Remarks on Parents", "Status"]     # the school's own notes: a parent they already worked on is not called

@@ -734,6 +734,9 @@ class Engine:
             return "No such enquiry"
         if r["status"] == Status.CALLING.value:
             return "A call to this parent is in progress"
+        if r["status"] != Status.TRANSFERRED.value and not self.store.one(
+                "SELECT 1 x FROM calls WHERE lead_id=? AND outcome=? LIMIT 1", (lead_id, "TRANSFERRED")):
+            return "This parent has not been connected to a counselor yet, so no outcome can be saved"
         note = f"{self.OUTCOMES[outcome]}{' - asked not to be disturbed' if dnd and outcome != 'dnd' else ''} (marked by {who or 'a counselor'})"
         status = Status.RESOLVED.value
         if dnd:

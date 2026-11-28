@@ -1228,10 +1228,18 @@ def test_new_enquiries_also_wait_for_the_campus_line_and_go_before_older_ones():
     assert len(e.tick(MON_10AM + timedelta(seconds=45))) == 1
 
 
+def connect_call(s, lead_id, ref=None):
+    """Record a finished call that reached a counselor (the outcome box is locked until then)."""
+    s.x("INSERT INTO calls(call_ref, lead_id, attempt, started_at, outcome, ended_at) VALUES(?,?,?,?,?,?)",
+        (ref or f"cc{lead_id}", lead_id, 1, MON_10AM.isoformat(), "TRANSFERRED", MON_10AM.isoformat()))
+
+
 def test_counselor_outcome_stops_calling_and_dnd_blocks_the_number():
     e, s, d, n = mk()
     e.ingest([lead(f"o{i}", phone=f"98765530{i:02d}", at=MON_10AM, campus="tng") for i in range(2)], MON_10AM)
     ids = [r["id"] for r in s.q("SELECT id FROM leads ORDER BY id")]
+    assert "not been connected" in e.set_outcome(ids[0], MON_10AM, "interested_next", "viji")      # locked: never reached a counselor
+    connect_call(s, ids[0]); connect_call(s, ids[1])
     assert e.set_outcome(ids[0], MON_10AM, "interested_next", "viji") is None
     a = s.one("SELECT status,outcome,next_attempt_at FROM leads WHERE id=?", (ids[0],))
     assert a["status"] == "RESOLVED" and a["outcome"] == "interested_next" and a["next_attempt_at"] is None
@@ -1280,6 +1288,7 @@ def test_queue_parked_puts_back_only_parents_never_called():
     ids = [r["id"] for r in s.q("SELECT id FROM leads ORDER BY id")]
     e.set_control("stop", MON_10AM, "t")
     assert s.one("SELECT COUNT(*) n FROM leads WHERE status='NEEDS_REVIEW'")["n"] == 4
+    connect_call(s, ids[1])
     e.set_outcome(ids[1], MON_10AM, "needs_time", "t")                                  # done by hand: stays done
     s.update_lead(ids[2], MON_10AM, status="NEEDS_REVIEW", note="calling was stopped by an admin; please follow up by hand")
     s.add_dnc(s.one("SELECT phone FROM leads WHERE id=?", (ids[3],))["phone"], MON_10AM, "x")

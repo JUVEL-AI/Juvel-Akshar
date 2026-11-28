@@ -406,17 +406,18 @@ export default function Console({ data, demo, error, pinRequired = false, role =
                   {!demo && (
                     <fieldset style={{ border: "1px solid #2A3A4B", borderRadius: 10, padding: "8px 12px", marginTop: 12 }}>
                       <legend className="eyebrow" style={{ padding: "0 6px" }}>After speaking to the parent</legend>
-                      <select aria-label="Outcome" style={{ width: "100%", padding: "8px 10px", fontSize: 15 }}
+                      {!reached(sel) && <div className="sub" style={{ marginBottom: 8 }}>🔒 Locked until this parent is connected to a counselor, so a result cannot be saved on the wrong enquiry.</div>}
+                      <select aria-label="Outcome" disabled={!reached(sel)} style={{ width: "100%", padding: "8px 10px", fontSize: 15 }}
                         value={pick.id === sel.id ? pick.v : (sel.outcome && OUTCOMES.some(([v]) => v === sel.outcome) ? sel.outcome : "")}
                         onChange={(e) => setPick({ id: sel.id, v: e.target.value, dnd: pick.id === sel.id ? pick.dnd : false })}>
                         <option value="">Choose what the parent said…</option>
                         {OUTCOMES.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
                       </select>
                       <label style={{ display: "flex", gap: 8, alignItems: "center", padding: "8px 0 2px", fontSize: 14, cursor: "pointer" }}>
-                        <input type="checkbox" checked={pick.id === sel.id && pick.dnd} onChange={(e) => setPick({ id: sel.id, v: pick.id === sel.id ? pick.v : "", dnd: e.target.checked })} />
+                        <input type="checkbox" disabled={!reached(sel)} checked={pick.id === sel.id && pick.dnd} onChange={(e) => setPick({ id: sel.id, v: pick.id === sel.id ? pick.v : "", dnd: e.target.checked })} />
                         Parent asked not to be called again (Do not disturb)
                       </label>
-                      <button type="button" className="fchip" style={{ marginTop: 6 }} disabled={pick.id !== sel.id || (!pick.v && !pick.dnd)}
+                      <button type="button" className="fchip" style={{ marginTop: 6 }} disabled={!reached(sel) || pick.id !== sel.id || (!pick.v && !pick.dnd)}
                         onClick={() => saveOutcome(sel.id, pick.v, pick.dnd)}>Save</button>
                       {sel.outcome && <div className="sub" style={{ marginTop: 6 }}>Saved: {OUTCOME_LABEL[sel.outcome] ?? sel.outcome}. Calling has stopped for this enquiry.</div>}
                     </fieldset>)}
